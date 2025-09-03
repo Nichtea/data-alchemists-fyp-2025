@@ -1,8 +1,8 @@
-from flask import Blueprint, render_template
+from flask import render_template
 
-test_controller = Blueprint('test_controller', __name__, template_folder='src/templates')
+class TestController:
 
-@test_controller.route('/')
-def home():
-    return render_template('index.html')
-
+    @staticmethod
+    def home():
+        
+        return render_template('index.html')
