@@ -3,8 +3,7 @@ from flask import jsonify, request
 import osmnx as ox
 import os
 
-# Load road network from GraphML file
-graph_path = "sg_bus_network.graphml"  # or sg_car_network.graphml
+graph_path = "sg_bus_network.graphml"  
 G = ox.load_graphml(graph_path)
 
 
@@ -29,11 +28,9 @@ def get_flood_event_by_id(flood_event_id):
     flood_lat = flood_event.get('geom').get('coordinates')[1]
     flood_lon = flood_event.get('geom').get('coordinates')[0]
 
-    # Load road network
     G = ox.load_graphml("sg_bus_network.graphml")
     nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
 
-    # Correctly unpack the first result
     u, v, key = nearest_edge[0]  
     edge_data = G.get_edge_data(u, v, key)
 
