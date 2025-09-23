@@ -1,5 +1,5 @@
 from flask import Blueprint
-from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id)
+from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id, get_bus_trip_delay)
 
 bus_route = Blueprint('bus_route', __name__)
 
@@ -26,3 +26,7 @@ def all_bus_trip_segments():
 @bus_route.route('/bus_trip_segment/<int:segment_id>', methods=['GET'])
 def bus_trip_segment_by_id(segment_id):
     return get_bus_trip_segment_by_id(segment_id)
+
+@bus_route.route('/bus_trips/delay', methods=['GET'])
+def bus_trips_with_delay():
+    return get_bus_trip_delay()
