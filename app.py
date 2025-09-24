@@ -1,5 +1,6 @@
 from flask import Flask
 from dotenv import load_dotenv
+from flasgger import Swagger
 import os
 
 from src.routes.test_routes import test_route
@@ -12,6 +13,7 @@ def create_app():
     app = Flask(__name__,template_folder="src/templates")
     load_dotenv()
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+    swagger = Swagger(app)
     app.register_blueprint(test_route)
     app.register_blueprint(car_trips_route)
     app.register_blueprint(bus_route)

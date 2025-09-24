@@ -44,9 +44,9 @@ def get_all_bus_trip_segment():
 
     return jsonify(response.data), 200
 
-def get_bus_trip_segment_by_id(segment_id):
+def get_bus_trip_segment_by_id(bus_trip_id):
     try:
-        response = supabase.table('bus_trip_segment').select('*').eq('bus_trip_id', segment_id).execute()
+        response = supabase.table('bus_trip_segment').select('*').eq('bus_trip_id', bus_trip_id).execute()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
