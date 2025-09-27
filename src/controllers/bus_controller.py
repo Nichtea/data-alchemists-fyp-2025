@@ -147,3 +147,58 @@ def get_bus_trip_delay():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+def get_unique_end_area_codes():
+    AREA_CODES = {
+    "Ang Mo Kio": "AM",
+    "Bedok": "BD",
+    "Bukit Batok": "BK",
+    "Boon Lay": "BL",
+    "Bukit Merah": "BM",
+    "Bukit Panjang": "BP",
+    "Bishan": "BS",
+    "Bukit Timah": "BT",
+    "Changi": "CH",
+    "Choa Chu Kang": "CK",
+    "Clementi": "CL",
+    "Downtown": "DT",
+    "Gul Circle": "GL",
+    "Hougang": "HG",
+    "Jurong East": "JE",
+    "Jurong West": "JW",
+    "Kallang": "KL",
+    "Loyang/Kembangan": "LK",
+    "Mandai": "MD",
+    "Marine Parade": "ME",
+    "Marsiling": "MP",
+    "Marsiling/Sembawang": "MS",
+    "Muara": "MU",
+    "Newton": "NT",
+    "Novena": "NV",
+    "Outram": "OR",
+    "Other": "OT",
+    "Punggol": "PG",
+    "Pasir Laba": "PL",
+    "Pioneer": "PN",
+    "Pasir Ris": "PR",
+    "Queenstown": "QT",
+    "Raffles City/CBD": "RC",
+    "Riverside": "RV",
+    "Sembawang": "SB",
+    "Seletar": "SE",
+    "Siglap": "SG",
+    "Sengkang": "SK",
+    "Simei": "SL",
+    "Serangoon": "SR",
+    "Sungei Kadut": "SV",
+    "Tampines": "TH",
+    "Tengah": "TM",
+    "Tanjong Pagar": "TN",
+    "Toa Payoh": "TP",
+    "Tuas": "TS",
+    "West Coast": "WC",
+    "Woodlands": "WD",
+    "Yishun": "YS"
+    }
+
+    return jsonify(AREA_CODES), 200
