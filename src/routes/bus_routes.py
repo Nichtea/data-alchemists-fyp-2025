@@ -1,5 +1,5 @@
 from flask import Blueprint
-from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id, get_bus_trip_delay, get_unique_end_area_codes, get_bus_trip_segement_delay)
+from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id, get_bus_trip_delay, get_unique_end_area_codes, get_bus_trip_segment_delay)
 from flasgger import swag_from
 from ..examples_for_doc.bus_api_examples import *
 from ..examples_for_doc.bus_related_schemas import *
@@ -158,4 +158,4 @@ def bus_trips_end_area_codes():
 
 @bus_route.route('/bus_trip_segments/delay', methods=['GET'])
 def bus_trip_segments_with_delay():
-    return get_bus_trip_segement_delay()
+    return get_bus_trip_segment_delay()
