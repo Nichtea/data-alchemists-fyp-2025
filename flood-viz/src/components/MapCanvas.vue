@@ -28,11 +28,11 @@ const STOP_STYLE_ACTIVE: L.CircleMarkerOptions = {
 let lastSelectedStopMarker: L.CircleMarker | null = null
 
 function activateStopMarker(m: L.CircleMarker) {
-  // 先恢复上一个
+
   if (lastSelectedStopMarker && lastSelectedStopMarker !== m) {
     lastSelectedStopMarker.setStyle(STOP_STYLE_DEFAULT)
   }
-  // 设置当前为红色
+
   m.setStyle(STOP_STYLE_ACTIVE)
   m.bringToFront()
   lastSelectedStopMarker = m
