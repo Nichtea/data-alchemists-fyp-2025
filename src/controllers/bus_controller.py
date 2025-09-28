@@ -55,6 +55,63 @@ def get_bus_trip_segment_by_id(bus_trip_id):
 
     return jsonify(response.data[0]), 200
 
+def get_bus_trip_segment_delay():
+    start_stop = request.args.get('start_stop')
+    end_stop = request.args.get('end_stop')
+
+    if not start_stop or not end_stop:
+        return jsonify({
+            "error": "Missing required parameters: start_stop and end_stop are required."
+        }), 400
+
+    try:
+        response = supabase.table("bus_trip_segment") \
+            .select("*") \
+            .eq("origin_stop_id", start_stop) \
+            .eq("destination_stop_id", end_stop) \
+            .limit(1) \
+            .execute()
+
+        if hasattr(response, 'error') and response.error:
+            return jsonify({
+                "error": response.error.message
+            }), 500
+
+        data = response.data
+
+        if not data or len(data) == 0:
+            return jsonify({
+                "error": "No matching bus trip segment found for the given stops."
+            }), 404
+        
+        segment = data[0]
+
+        return jsonify({
+            "start_stop": segment.get("origin_stop_id"),
+            "end_stop": segment.get("destination_stop_id"),
+            "non_flooded_bus_duration": segment.get("non_flooded_bus_duration"),
+            "origin_stop_id": segment.get("origin_stop_id"),
+            "destination_stop_id": segment.get("destination_stop_id"),
+            "flooded_durations": {
+                "5kmh": segment.get('5kmh_flooded_bus_duration'),
+                "12kmh": segment.get('12kmh_flooded_bus_duration'),
+                "30kmh": segment.get('30kmh_flooded_bus_duration'),
+                "48kmh": segment.get('48kmh_flooded_bus_duration')
+            },
+            "delays": {
+                "5kmh": segment.get('5kmh_flooded_bus_duration') - segment.get('non_flooded_bus_duration'),
+                "12kmh": segment.get('12kmh_flooded_bus_duration') - segment.get('non_flooded_bus_duration'),
+                "30kmh": segment.get('30kmh_flooded_bus_duration') - segment.get('non_flooded_bus_duration'),
+                "48kmh": segment.get('48kmh_flooded_bus_duration') - segment.get('non_flooded_bus_duration')
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
 def get_bus_trip_delay():
     try:
         stop_id = request.args.get('stop_id')
