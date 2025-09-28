@@ -1,0 +1,10 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+      { "type": "Feature", "properties": { "segment_id": 9101, "depth_class": "M" },
+        "geometry": { "type": "LineString", "coordinates": [[103.80,1.34],[103.86,1.37]] } },
+      { "type": "Feature", "properties": { "segment_id": 9102, "depth_class": "H" },
+        "geometry": { "type": "LineString", "coordinates": [[103.78,1.33],[103.82,1.36]] } }
+    ]
+  }
+  

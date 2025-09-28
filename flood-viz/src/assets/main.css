@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #app { height: 100%; margin: 0; }
+.app-shell { display:flex; height:100%; }
+.sidebar { width: 320px; border-right: 1px solid #eee; padding: 12px; overflow:auto; }
+.map-wrap { flex: 1; position: relative; }
+.map-el { position:absolute; inset:0; }
+.legend {
+  position: absolute; right: 10px; bottom: 10px;
+  background: rgba(255,255,255,.9); border: 1px solid #ddd; border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.4;
+}
+.legend .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
+.legend .swatch { width:16px; height:10px; display:inline-block; border:1px solid #999; }

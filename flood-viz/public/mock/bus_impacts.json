@@ -1,0 +1,7 @@
+{
+    "total_delay_min": 1532,
+    "affected_ratio": 0.37,
+    "top_segment": { "segment_id": 104, "delay_min": 8.5 },
+    "impacted_bus_count": 23
+  }
+  

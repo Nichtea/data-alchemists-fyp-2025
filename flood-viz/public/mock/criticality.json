@@ -1,0 +1,15 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+      { "type": "Feature",
+        "properties": { "segment_id": 5001, "tier": "H", "score": 0.92 },
+        "geometry": { "type": "LineString", "coordinates": [[103.78,1.33],[103.82,1.36]] } },
+      { "type": "Feature",
+        "properties": { "segment_id": 5002, "tier": "M", "score": 0.55 },
+        "geometry": { "type": "LineString", "coordinates": [[103.84,1.33],[103.88,1.35]] } },
+      { "type": "Feature",
+        "properties": { "segment_id": 5003, "tier": "L", "score": 0.21 },
+        "geometry": { "type": "LineString", "coordinates": [[103.83,1.36],[103.86,1.38]] } }
+    ]
+  }
+  
