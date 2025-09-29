@@ -194,8 +194,6 @@ const stopIndexByCode = computed<Record<string, { lat:number; lon:number; name:s
   return m
 })
 
-const roadSegCache = new Map<string, [number, number][]>()
-
 /** ---------- OneMap PT (address) state ---------- */
 const ptLoading = ref(false)
 const ptError = ref<string | null>(null)
@@ -345,8 +343,161 @@ async function fetchArrivalsForSelected() {
 
 watch(() => store.selectedStop, () => { fetchArrivalsForSelected() }, { immediate: true })
 
+/* ---------------- Flood timing helpers ---------------- */
+function toNumOrUndefined(val: unknown): number | undefined {
+  if (typeof val === 'number' && Number.isFinite(val)) return val
+  if (Array.isArray(val) && val.length && Number.isFinite(val[0] as any)) return Number(val[0])
+  return undefined
+}
 
-/** ---------- OneMap PT: top-level function (VISIBLE TO TEMPLATE) ---------- */
+function legIsFlooded(leg: any): boolean {
+  if (!leg || leg.mode !== 'BUS') return false
+  const base = toNumOrUndefined(leg.non_flooded_bus_duration)
+  if (!Number.isFinite(base)) return false
+  const candidates = [
+    toNumOrUndefined(leg['5kmh_flooded_bus_duration']),
+    toNumOrUndefined(leg['12kmh_flooded_bus_duration']),
+    toNumOrUndefined(leg['30kmh_flooded_bus_duration']),
+    toNumOrUndefined(leg['48kmh_flooded_bus_duration']),
+  ].filter((x): x is number => Number.isFinite(x as any))
+  return candidates.some(v => v! > (base as number))
+}
+
+/** Aggregate non-flooded & flooded durations (seconds) across all BUS legs */
+function summarizeFloodDurations(legs: any[]) {
+  let baseline_s = 0
+  let anyBaseline = false
+  const map = new Map<string, number>() // scenario -> seconds
+
+  for (const leg of legs ?? []) {
+    if (leg?.mode !== 'BUS') continue
+
+    // baseline (non-flooded)
+    const base = toNumOrUndefined((leg as any).non_flooded_bus_duration)
+    if (Number.isFinite(base)) {
+      baseline_s += base!
+      anyBaseline = true
+    }
+
+    // flooded scenarios
+    const pairs: Array<[label: string, key: string]> = [
+      ['5 km/h flooded',  '5kmh_flooded_bus_duration'],
+      ['12 km/h flooded', '12kmh_flooded_bus_duration'],
+      ['30 km/h flooded', '30kmh_flooded_bus_duration'],
+      ['48 km/h flooded', '48kmh_flooded_bus_duration'],
+    ]
+    for (const [label, key] of pairs) {
+      const v = toNumOrUndefined((leg as any)[key])
+      if (Number.isFinite(v)) {
+        map.set(label, (map.get(label) ?? 0) + (v as number))
+      }
+    }
+  }
+
+  return {
+    baseline_s: anyBaseline ? baseline_s : undefined,
+    scenarios: Array.from(map.entries()).map(([scenario, duration_s]) => ({ scenario, duration_s }))
+      .sort((a,b) => a.duration_s - b.duration_s),
+  }
+}
+
+/* -------- Build colored polylines (red if leg is flooded) -------- */
+const BASE_COLOR = '#2563eb'      // blue
+const FLOODED_COLOR = '#dc2626'   // red
+
+async function buildColoredPolylinesFromItinerary(it: any) {
+  const legs: any[] = Array.isArray(it?.legs) ? it.legs : []
+  const busLegs = legs.filter(l => l?.mode === 'BUS')
+
+  const polylines: Array<{ path: [number,number][], color: string, flooded: boolean }> = []
+  const segments: Array<{ points: [number,number][], flooded: boolean }> = []
+
+  for (const leg of busLegs) {
+    // collect stop codes along this leg
+    const codes: string[] = []
+    const a = leg?.from?.stopCode
+    const b = leg?.to?.stopCode
+    if (a) codes.push(String(a))
+    const interm = Array.isArray(leg?.intermediateStops) ? leg.intermediateStops : []
+    for (const st of interm) {
+      if (st?.stopCode) codes.push(String(st.stopCode))
+    }
+    if (b && (!codes.length || codes[codes.length - 1] !== String(b))) codes.push(String(b))
+
+    // make a polyline for the whole leg
+    let path: [number,number][] | undefined
+    if (codes.length >= 2) {
+      const osrm = await computeRoadPathForSegment(codes)
+      path = osrm?.path
+    }
+    if (!path || path.length < 2) {
+      const pts = [a, b].map((c:string)=>latLonFromCode(String(c))).filter(Boolean) as [number,number][]
+      if (pts.length >= 2) path = pts
+    }
+    if (!path || path.length < 2) continue
+
+    const flooded = legIsFlooded(leg)
+    const color = flooded ? FLOODED_COLOR : BASE_COLOR
+
+    polylines.push({ path, color, flooded })
+    segments.push({ points: path, flooded })
+  }
+
+  // Build a combined unique stop sequence for info box
+  const stopCodes: string[] = []
+  for (const leg of busLegs) {
+    const a = leg?.from?.stopCode
+    const b = leg?.to?.stopCode
+    if (a) stopCodes.push(String(a))
+    if (Array.isArray(leg?.intermediateStops)) {
+      for (const st of leg.intermediateStops) if (st?.stopCode) stopCodes.push(String(st.stopCode))
+    }
+    if (b) stopCodes.push(String(b))
+  }
+  const seen = new Set<string>()
+  const segmentCodes = stopCodes.filter(c => !seen.has(c) && seen.add(c))
+  const points: [number, number][] = segmentCodes.map(c => latLonFromCode(c)).filter(Boolean) as [number, number][]
+
+  return { polylines, segments, stopCodes: segmentCodes, points }
+}
+
+/** ------------ Hold all built itineraries and selection ------------ */
+type BuiltItinerary = {
+  duration_s: number
+  transfers: number
+  floodSummary: { baseline_s?: number, scenarios: {scenario:string; duration_s:number}[] }
+  polylines: Array<{ path:[number,number][], color:string, flooded:boolean }>
+  segments: Array<{ points:[number,number][], flooded:boolean }>
+  stopCodes: string[]
+  points: [number,number][]
+  legs: any[]
+}
+const ptItins = ref<BuiltItinerary[]>([])
+const selectedItinIdx = ref<number>(0)
+
+function applyItineraryToMap(i: number) {
+  const it = ptItins.value[i]
+  if (!it) return
+  ;(store as any).setServiceRouteOverlay?.({
+    serviceNo: `OneMap PT • Option ${i+1}`,
+    directions: [{
+      dir: 1,
+      points: it.points,
+      stopCodes: it.stopCodes,
+      duration_s: it.duration_s,
+      floodSummary: it.floodSummary,
+      segments: it.segments,
+    }],
+    polylines: it.polylines,
+    baseColor: BASE_COLOR,
+    floodedColor: FLOODED_COLOR,
+  })
+  ;(store as any).setColoredPolylines?.(it.polylines)
+  ;(store as any).setActiveTab?.('stops')
+  ;(store as any).fitToOverlayBounds?.()
+}
+
+/** ---------- OneMap PT: top-level function (now builds ALL itineraries) ---------- */
 async function queryPtRouteViaOneMap() {
   if (!originText.value || !destText.value) {
     alert('Enter a start and end address to use OneMap PT routing.')
@@ -363,52 +514,29 @@ async function queryPtRouteViaOneMap() {
     const res: any = await getOneMapPtRoute({
       start_address: originText.value,
       end_address: destText.value,
-      time: '07:00:00', // tweak/parameterize as needed
+      time: '07:00:00',
     })
 
-    const it = res?.plan?.itineraries?.[0]
-    if (!it || !Array.isArray(it.legs) || !it.legs.length) {
+    const itins: any[] = Array.isArray(res?.plan?.itineraries) ? res.plan.itineraries : []
+    if (!itins.length) {
       alert('No PT itinerary found.')
       return
     }
 
-    // BUS legs -> stop codes -> de-dup
-    const busLegs = it.legs.filter((l: any) => l?.mode === 'BUS')
-    const stopCodes: string[] = []
-    for (const leg of busLegs) {
-      const a = leg?.from?.stopCode
-      const b = leg?.to?.stopCode
-      if (a) stopCodes.push(String(a))
-      if (b) stopCodes.push(String(b))
+    // Build ALL itineraries
+    const built: BuiltItinerary[] = []
+    for (const it of itins) {
+      const duration_s = Number(it?.duration ?? 0)
+      const transfers = Number(it?.transfers ?? 0)
+      const floodSummary = summarizeFloodDurations(it?.legs || [])
+      const { polylines, segments, stopCodes, points } = await buildColoredPolylinesFromItinerary(it)
+      built.push({ duration_s, transfers, floodSummary, polylines, segments, stopCodes, points, legs: it?.legs || [] })
     }
-    const seen = new Set<string>()
-    const segmentCodes = stopCodes.filter(c => !seen.has(c) && seen.add(c))
+    ptItins.value = built
+    selectedItinIdx.value = 0
+    applyItineraryToMap(0)
 
-    // try to draw an OSRM road polyline following the bus segment chain
-    let roadPath: [number, number][] | undefined
-    if (segmentCodes.length >= 2) {
-      const osrmRes = await computeRoadPathForSegment(segmentCodes)
-      if (osrmRes?.path?.length) roadPath = osrmRes.path
-    }
-
-    const points: [number, number][] = segmentCodes
-      .map(c => latLonFromCode(c))
-      .filter(Boolean) as [number, number][]
-
-    ;(store as any).setServiceRouteOverlay?.({
-      serviceNo: 'OneMap PT',
-      directions: [{
-        dir: 1,
-        points,
-        stopCodes: segmentCodes,
-        roadPath,
-        duration_s: Number(it.duration ?? 0),
-      }]
-    })
-
-    ;(store as any).oneMapLegs = it.legs // optional for richer popups
-    ;(store as any).setActiveTab?.('stops')
-    ;(store as any).fitToOverlayBounds?.()
+    ;(store as any).oneMapLegs = built[0]?.legs
   } catch (e: any) {
     ptError.value = e?.message || 'PT route failed'
     console.error(e)
@@ -417,14 +545,11 @@ async function queryPtRouteViaOneMap() {
   }
 }
 
-
-
 /** ---------- Stop→Stop best route ---------- */
 const hasOrigin = computed(() => Boolean((store as any).origin?.lat && (store as any).origin?.lon))
 const hasDest = computed(() => Boolean((store as any).destination?.lat && (store as any).destination?.lon))
 
 async function queryBestBusRoute() {
-  // require explicit stop selection; for addresses use OneMap PT button
   if (!store.originStopCode || !store.destStopCode) {
     alert('Pick origin and destination bus stops from the suggestions first. For address-to-address, use “OneMap PT (address)”.')
     return
@@ -566,7 +691,6 @@ onMounted(async () => {
       </label>
 
       <div class="flex items-center gap-2">
-        <!-- stop→stop best route -->
         <button
           class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
           @click="queryBestBusRoute"
@@ -580,7 +704,6 @@ onMounted(async () => {
           Find best bus route
         </button>
 
-        <!-- OneMap PT (address→address via backend) -->
         <button
           class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
           @click="queryPtRouteViaOneMap"
@@ -597,6 +720,80 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ====== Itinerary list (ALL options) ====== -->
+    <div v-if="ptItins.length" class="mb-4">
+      <div class="text-sm font-semibold mb-2">Itineraries ({{ ptItins.length }})</div>
+
+      <div class="space-y-3">
+        <div
+          v-for="(it, idx) in ptItins"
+          :key="'it-' + idx"
+          :class="['rounded-xl border p-3 shadow-sm', selectedItinIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200']"
+        >
+          <div class="flex items-center gap-3">
+            <div class="text-base font-semibold">Option {{ idx + 1 }}</div>
+            <div class="text-sm text-gray-700">
+              ~ {{ Math.round(it.duration_s / 60) }} min
+              <span class="text-gray-400">•</span>
+              {{ it.transfers }} transfer{{ it.transfers === 1 ? '' : 's' }}
+            </div>
+            <div class="ml-auto">
+              <button
+                class="rounded-md border px-2 py-1 text-xs"
+                :class="selectedItinIdx === idx ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 hover:bg-gray-50'"
+                @click="selectedItinIdx = idx; applyItineraryToMap(idx)"
+                title="Show this itinerary on the map"
+              >
+                {{ selectedItinIdx === idx ? 'Shown on map' : 'Show on map' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Flood timings / delays -->
+          <div class="mt-2 rounded-md bg-gray-50 p-3 text-sm">
+            <div class="font-medium mb-1">Travel time scenarios</div>
+
+            <div v-if="it.floodSummary?.baseline_s !== undefined" class="text-gray-700">
+              Non-flooded: ~ {{ Math.round(it.floodSummary.baseline_s / 60) }} min
+            </div>
+
+            <template v-if="it.floodSummary?.scenarios?.length">
+              <ul class="mt-1 text-xs text-gray-600 space-y-0.5">
+                <li
+                  v-for="sc in it.floodSummary.scenarios"
+                  :key="sc.scenario"
+                >
+                  {{ sc.scenario }}: ~ {{ Math.round(sc.duration_s / 60) }} min
+                  <template v-if="it.floodSummary?.baseline_s !== undefined">
+                    <span class="text-[11px] text-gray-500">
+                      (Δ {{ Math.round((sc.duration_s - it.floodSummary.baseline_s) / 60) }} min)
+                    </span>
+                  </template>
+                </li>
+              </ul>
+            </template>
+
+            <div v-else class="text-xs text-gray-500">
+              No travel delay
+            </div>
+
+            <!-- Legend for polyline colors -->
+            <div class="mt-2 flex items-center gap-4 text-xs text-gray-600">
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: '#2563eb' }"></span>
+                Normal
+              </span>
+              <span class="inline-flex items-center gap-1">
+                <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: '#dc2626' }"></span>
+                Flooded segment
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== Selected stop detail + arrivals (unchanged) ====== -->
     <div v-if="store.selectedStopLoading" class="text-sm text-gray-500">
       Loading stop details...
     </div>
@@ -633,7 +830,7 @@ onMounted(async () => {
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10">
-                  Best route
+                  Selected route
                 </span>
                 <div class="text-base font-semibold">
                   {{ (store as any).serviceRouteOverlay.serviceNo }}
@@ -664,6 +861,47 @@ onMounted(async () => {
                 </div>
                 <div class="ml-auto text-xs text-gray-500">
                   geometry: {{ d.roadPath ? 'OSRM road' : 'stop-to-stop' }}
+                </div>
+              </div>
+
+              <!-- Flood timings / delays for the SELECTED itinerary -->
+              <div class="mt-2 rounded-md bg-gray-50 p-3 text-sm">
+                <div class="font-medium mb-1">Travel time scenarios</div>
+
+                <div v-if="d.floodSummary?.baseline_s !== undefined" class="text-gray-700">
+                  Non-flooded: ~ {{ Math.round(d.floodSummary.baseline_s / 60) }} min
+                </div>
+
+                <template v-if="d.floodSummary?.scenarios?.length">
+                  <ul class="mt-1 text-xs text-gray-600 space-y-0.5">
+                    <li
+                      v-for="sc in d.floodSummary.scenarios"
+                      :key="sc.scenario"
+                    >
+                      {{ sc.scenario }}: ~ {{ Math.round(sc.duration_s / 60) }} min
+                      <template v-if="d.floodSummary?.baseline_s !== undefined">
+                        <span class="text-[11px] text-gray-500">
+                          (Δ {{ Math.round((sc.duration_s - d.floodSummary.baseline_s) / 60) }} min)
+                        </span>
+                      </template>
+                    </li>
+                  </ul>
+                </template>
+
+                <div v-else class="text-xs text-gray-500">
+                  No travel delay
+                </div>
+
+                <!-- Legend for polyline colors -->
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-600">
+                  <span class="inline-flex items-center gap-1">
+                    <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: (store as any).serviceRouteOverlay?.baseColor || '#2563eb' }"></span>
+                    Normal
+                  </span>
+                  <span class="inline-flex items-center gap-1">
+                    <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: (store as any).serviceRouteOverlay?.floodedColor || '#dc2626' }"></span>
+                    Flooded segment
+                  </span>
                 </div>
               </div>
 
@@ -708,7 +946,7 @@ onMounted(async () => {
               <div class="text-xs text-gray-500">
                 <div>{{ svc.operator }}</div>
                 <div v-if="svc.next?.time" class="text-[11px]">
-                  ETA: {{ mins((svc.next?.duration_ms ?? 0) / 1000 * 60) }}
+                  ETA: {{ Math.round((svc.next?.duration_ms ?? 0) / 60000) }} min
                 </div>
               </div>
               <button
