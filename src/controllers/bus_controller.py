@@ -1,5 +1,113 @@
 from src.database import supabase
-from flask import jsonify, request
+from flask import jsonify, request, Blueprint
+import os
+import requests
+import json
+import googlemaps
+from datetime import datetime
+
+
+one_map_route = Blueprint('one_map_route', __name__)
+ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
+ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY")  # Set this in your environment
+gmaps = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
+
+def get_bus_trip_segment_by_stop(start_stop, end_stop):
+    try:
+        response = supabase.table('bus_trip_segment').select('*').eq('origin_stop_id', start_stop).eq('destination_stop_id', end_stop).execute()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    if not response.data or len(response.data) == 0:
+        return jsonify({'error': 'Bus trip segment not found'}), 404
+
+    return jsonify(response.data[0]), 200   
+
+
+def get_onemap_route():
+    start_address = request.args.get('start_address')
+    end_address = request.args.get('end_address')
+    if not start_address or not end_address:
+        return jsonify({"error": "start_address and end_address are required"}), 400
+
+    start_location = gmaps.geocode(start_address)
+    if not start_location:
+        return jsonify({"error": "Start address not found"}), 404
+    start_lat_raw = start_location[0]['geometry']['location']['lat']
+    start_lon_raw = start_location[0]['geometry']['location']['lng']
+
+    end_location = gmaps.geocode(end_address)
+    if not end_location:
+        return jsonify({"error": "End address not found"}), 404
+    end_lat_raw = end_location[0]['geometry']['location']['lat']
+    end_lon_raw = end_location[0]['geometry']['location']['lng']
+
+    start_lat = start_lat_raw
+    start_lon = start_lon_raw
+    end_lat = end_lat_raw
+    end_lon = end_lon_raw
+
+    date = request.args.get('date', datetime.today().strftime('%m-%d-%Y'))
+    time = request.args.get('time', '07:00:00')  # Default 7 AM
+
+    if not (start_lat and start_lon and end_lat and end_lon):
+        return jsonify({
+            "error": "start_lat, start_lon, end_lat, and end_lon are required."
+        }), 400
+
+    if not ONEMAP_API_KEY:
+        return jsonify({"error": "OneMap API key missing. Please set ONEMAP_API_KEY environment variable."}), 500
+
+    params = {
+        "start": f"{start_lat},{start_lon}",
+        "end": f"{end_lat},{end_lon}",
+        "routeType": "pt",          # Public transport mode
+        "date": date,
+        "time": time,
+        "mode": "BUS",          # Transit includes bus/train/mrt
+        #"maxWalkDistance": "1000",  # Max walking distance in meters
+        "numItineraries": "3"       # Number of route options to return
+    }
+
+    headers = {
+        "Authorization": ONEMAP_API_KEY
+    }
+
+    try:
+        response = requests.get(ONEMAP_BASE_URL, headers=headers, params=params, timeout=15)
+        data = response.json()  
+        for itinerary in data.get("plan", {}).get("itineraries", []):
+            for leg in itinerary.get("legs", []):
+                if leg.get("mode") == "BUS":
+                    start_stop_id = leg.get("from", {}).get("stopCode")
+                    end_stop_id = leg.get("to", {}).get("stopCode")
+                    if start_stop_id and end_stop_id:
+                        delay = get_bus_trip_segment_by_stop(start_stop_id, end_stop_id)
+                        delay_str = delay[0].data.decode("utf-8")
+                        delay_json = json.loads(delay_str)
+                        if "error" not in delay_json:
+                            leg["non_flooded_bus_duration"] = delay_json.get("non_flooded_bus_duration"),
+                            leg["5kmh_flooded_bus_duration"]= delay_json.get('5kmh_flooded_bus_duration'),
+                            leg["12kmh_flooded_bus_duration"]= delay_json.get('12kmh_flooded_bus_duration'),
+                            leg["30kmh_flooded_bus_duration"]= delay_json.get('30kmh_flooded_bus_duration'),
+                            leg["48kmh_flooded_bus_duration"]= delay_json.get('48kmh_flooded_bus_duration')
+                            print(f"Added non_flooded_bus_duration: {leg['non_flooded_bus_duration']} for leg from {start_stop_id} to {end_stop_id}")
+
+        if response.status_code != 200:
+            return jsonify({
+                "error": "OneMap API request failed",
+                "status_code": response.status_code,
+                "details": response.text
+            }), response.status_code
+
+        return jsonify(data), 200
+
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "OneMap API request timed out"}), 504
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 def get_all_bus_stops():
     response = supabase.table('bus_stops').select('*').execute()
