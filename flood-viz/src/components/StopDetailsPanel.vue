@@ -494,7 +494,13 @@ async function buildColoredPolylinesFromItinerary(it: any) {
   const segmentCodes = stopCodes.filter(c => !seen.has(c) && seen.add(c))
   const points: [number, number][] = segmentCodes.map(c => latLonFromCode(c)).filter(Boolean) as [number, number][]
 
-  return { polylines, segments, stopCodes: segmentCodes, points }
+  // NEW: merge all OSRM segments into a single roadPath
+  const roadPath: [number, number][] =
+    polylines.length
+      ? polylines.flatMap((pl, i) => (i === 0 ? pl.path : pl.path.slice(1)))
+      : []
+
+  return { polylines, segments, stopCodes: segmentCodes, points, roadPath }
 }
 
 /** ------------ Hold all built itineraries and selection ------------ */
@@ -507,6 +513,8 @@ type BuiltItinerary = {
   stopCodes: string[]
   points: [number,number][]
   legs: any[]
+  // NEW
+  roadPath?: [number, number][]
 }
 const ptItins = ref<BuiltItinerary[]>([])
 const selectedItinIdx = ref<number>(0)
@@ -523,6 +531,8 @@ function applyItineraryToMap(i: number) {
       duration_s: it.duration_s,
       floodSummary: it.floodSummary,
       segments: it.segments,
+      // NEW: draw OSRM road geometry when available
+      roadPath: (it.roadPath && it.roadPath.length >= 2) ? it.roadPath : undefined,
     }],
     polylines: it.polylines,
     baseColor: BASE_COLOR,
@@ -565,8 +575,8 @@ async function queryPtRouteViaOneMap() {
       const duration_s = Number(it?.duration ?? 0)
       const transfers = Number(it?.transfers ?? 0)
       const floodSummary = summarizeFloodDurations(it?.legs || [])
-      const { polylines, segments, stopCodes, points } = await buildColoredPolylinesFromItinerary(it)
-      built.push({ duration_s, transfers, floodSummary, polylines, segments, stopCodes, points, legs: it?.legs || [] })
+      const { polylines, segments, stopCodes, points, roadPath } = await buildColoredPolylinesFromItinerary(it)
+      built.push({ duration_s, transfers, floodSummary, polylines, segments, stopCodes, points, legs: it?.legs || [], roadPath })
     }
     ptItins.value = built
     selectedItinIdx.value = 0
