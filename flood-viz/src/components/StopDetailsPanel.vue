@@ -352,6 +352,11 @@ function toNumOrUndefined(val: unknown): number | undefined {
 
 function legIsFlooded(leg: any): boolean {
   if (!leg || leg.mode !== 'BUS') return false
+  // prefer explicit flag
+  const flag = String(leg?.overall_bus_route_status || '').toLowerCase()
+  if (flag === 'flooded') return true
+  if (flag === 'clear') return false
+
   const base = toNumOrUndefined(leg.non_flooded_bus_duration)
   if (!Number.isFinite(base)) return false
   const candidates = [
@@ -399,6 +404,37 @@ function summarizeFloodDurations(legs: any[]) {
     scenarios: Array.from(map.entries()).map(([scenario, duration_s]) => ({ scenario, duration_s }))
       .sort((a,b) => a.duration_s - b.duration_s),
   }
+}
+
+/* -------- NEW: helpers for route chips & stop lists -------- */
+function legStops(leg: any): string[] {
+  if (!leg?.transitLeg || leg?.mode !== 'BUS') return []
+  const arr: string[] = []
+  const a = leg?.from?.stopCode && String(leg.from.stopCode)
+  const b = leg?.to?.stopCode && String(leg.to.stopCode)
+  if (a) arr.push(a)
+  if (Array.isArray(leg?.intermediateStops)) {
+    for (const st of leg.intermediateStops) {
+      if (st?.stopCode) arr.push(String(st.stopCode))
+    }
+  }
+  if (b) arr.push(b)
+  return arr.filter((c, i) => i === 0 || c !== arr[i - 1])
+}
+function legStatus(leg: any): 'flooded' | 'clear' {
+  const flag = String(leg?.overall_bus_route_status || '').toLowerCase()
+  if (flag === 'flooded') return 'flooded'
+  if (flag === 'clear') return 'clear'
+  return legIsFlooded(leg) ? 'flooded' : 'clear'
+}
+function legChipStyle(leg: any) {
+  const s = legStatus(leg)
+  return s === 'flooded'
+    ? { bg: '#fee2e2', text: '#b91c1c', ring: 'rgba(239,68,68,.25)' }
+    : { bg: '#dbeafe', text: '#1d4ed8', ring: 'rgba(59,130,246,.25)' }
+}
+function routeLabel(leg: any) {
+  return leg?.routeShortName || leg?.route || 'BUS'
 }
 
 /* -------- Build colored polylines (red if leg is flooded) -------- */
@@ -749,6 +785,20 @@ onMounted(async () => {
             </div>
           </div>
 
+          <!-- NEW: Route ribbon (bus legs) -->
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <template v-for="(L, li) in it.legs.filter(x => x.mode==='BUS')" :key="'r-'+li">
+              <span
+                class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1"
+                :style="{ backgroundColor: legChipStyle(L).bg, color: legChipStyle(L).text, boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset` }"
+                :title="legStatus(L)==='flooded' ? 'Flooded segment' : 'Clear segment'"
+              >
+                {{ routeLabel(L) }}
+                <span v-if="li < it.legs.filter(x=>x.mode==='BUS').length-1" class="text-gray-400">→</span>
+              </span>
+            </template>
+          </div>
+
           <!-- Flood timings / delays -->
           <div class="mt-2 rounded-md bg-gray-50 p-3 text-sm">
             <div class="font-medium mb-1">Travel time scenarios</div>
@@ -789,6 +839,50 @@ onMounted(async () => {
               </span>
             </div>
           </div>
+
+          <!-- NEW: Stops & segments per bus leg -->
+          <details class="mt-2 rounded-md bg-gray-50 p-3 open:bg-gray-100">
+            <summary class="cursor-pointer select-none text-sm text-gray-700">Stops & segments</summary>
+
+            <div class="space-y-4 mt-2">
+              <div
+                v-for="(L, li) in it.legs.filter(x => x.mode==='BUS')"
+                :key="'legstops-'+li"
+                class="rounded-md border p-2"
+                :style="{ borderColor: legStatus(L)==='flooded' ? '#fecaca' : '#bfdbfe' }"
+              >
+                <div class="flex items-center gap-2 text-sm mb-2">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1"
+                    :style="{ backgroundColor: legChipStyle(L).bg, color: legChipStyle(L).text, boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset` }"
+                  >
+                    Route {{ routeLabel(L) }}
+                  </span>
+                  <span class="text-xs"
+                        :class="legStatus(L)==='flooded' ? 'text-rose-600' : 'text-blue-600'">
+                    {{ legStatus(L)==='flooded' ? 'Flooded' : 'Clear' }}
+                  </span>
+                </div>
+
+                <ol class="space-y-1">
+                  <li
+                    v-for="(code, si) in legStops(L)"
+                    :key="code + '-' + si"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <span
+                      class="inline-flex h-5 w-5 items-center justify-center rounded-full text-white text-[11px]"
+                      :style="{ backgroundColor: legStatus(L)==='flooded' ? '#dc2626' : '#2563eb' }"
+                    >
+                      {{ si + 1 }}
+                    </span>
+                    <span class="truncate">{{ stopIndexByCode[code]?.name || 'Stop' }}</span>
+                    <span class="text-xs text-gray-500">({{ code }})</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>
