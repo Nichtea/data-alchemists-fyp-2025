@@ -85,12 +85,14 @@ def get_onemap_route():
                         delay = get_bus_trip_segment_by_stop(start_stop_id, end_stop_id)
                         delay_str = delay[0].data.decode("utf-8")
                         delay_json = json.loads(delay_str)
+                        leg['overall_bus_route_status'] = "clear"
                         if "error" not in delay_json:
                             leg["non_flooded_bus_duration"] = delay_json.get("non_flooded_bus_duration"),
                             leg["5kmh_flooded_bus_duration"]= delay_json.get('5kmh_flooded_bus_duration'),
                             leg["12kmh_flooded_bus_duration"]= delay_json.get('12kmh_flooded_bus_duration'),
                             leg["30kmh_flooded_bus_duration"]= delay_json.get('30kmh_flooded_bus_duration'),
                             leg["48kmh_flooded_bus_duration"]= delay_json.get('48kmh_flooded_bus_duration')
+                            leg['overall_bus_route_status'] = "flooded"
                             print(f"Added non_flooded_bus_duration: {leg['non_flooded_bus_duration']} for leg from {start_stop_id} to {end_stop_id}")
 
         if response.status_code != 200:
