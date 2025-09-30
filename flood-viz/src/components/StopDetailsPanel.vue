@@ -406,6 +406,8 @@ function summarizeFloodDurations(legs: any[]) {
   }
 }
 
+
+
 /* -------- NEW: helpers for route chips & stop lists -------- */
 function legStops(leg: any): string[] {
   if (!leg?.transitLeg || leg?.mode !== 'BUS') return []

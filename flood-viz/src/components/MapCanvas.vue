@@ -18,6 +18,40 @@ let roadSegmentLayer: L.LayerGroup | null = null
 
 const store = useAppStore()
 
+/* ================= Leaflet colored polylines (normal vs flooded) ================ */
+let coloredPolylinesGroup: L.LayerGroup | null = null
+function ensureColoredGroup() {
+  if (!coloredPolylinesGroup) coloredPolylinesGroup = L.layerGroup().addTo(map)
+}
+function clearColoredPolylines() {
+  if (coloredPolylinesGroup) coloredPolylinesGroup.clearLayers()
+}
+/** Expects [{ path:[[lat,lon],...], color:'#hex', flooded:boolean }, ... ] */
+function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, flooded:boolean }>) {
+  ensureColoredGroup()
+  clearColoredPolylines()
+  if (!pl?.length) return
+  const all: L.LatLngExpression[] = []
+  for (const seg of pl) {
+    const latlngs = seg.path.map(([lat, lon]) => [lat, lon] as [number, number])
+    const layer = L.polyline(latlngs, {
+      color: seg.color,      // <-- flooded are red (#dc2626), normal blue (#2563eb) from upstream
+      weight: 5,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
+      // dashArray: seg.flooded ? '6,4' : undefined, // (optional) dashed flooded
+    })
+    layer.addTo(coloredPolylinesGroup!)
+    all.push(...latlngs)
+  }
+  const b = all.length ? L.latLngBounds(all as any) : null
+  if (b && b.isValid()) map.fitBounds(b.pad(0.12))
+}
+// expose so other components can call store.setColoredPolylines(polylines)
+;(store as any).setColoredPolylines = setColoredPolylines
+;(store as any).clearColoredPolylines = clearColoredPolylines
+/* ================================================================================ */
 
 const STOP_STYLE_DEFAULT: L.CircleMarkerOptions = {
   radius: 3, color: '#0ea5e9', weight: 2, fillColor: '#38bdf8', fillOpacity: 0.9,
@@ -28,16 +62,13 @@ const STOP_STYLE_ACTIVE: L.CircleMarkerOptions = {
 let lastSelectedStopMarker: L.CircleMarker | null = null
 
 function activateStopMarker(m: L.CircleMarker) {
-
   if (lastSelectedStopMarker && lastSelectedStopMarker !== m) {
     lastSelectedStopMarker.setStyle(STOP_STYLE_DEFAULT)
   }
-
   m.setStyle(STOP_STYLE_ACTIVE)
   m.bringToFront()
   lastSelectedStopMarker = m
 }
-
 
 function ensureMap() {
   if (map) return
@@ -101,7 +132,6 @@ function wktToLatLngs(wkt: string): [number, number][][] {
     return arr.length ? [arr] : []
   }
 }
-
 
 function renderRoadSegmentFromDetail(detail: any) {
   clearRoadSegment()
@@ -388,7 +418,6 @@ async function renderFloodEvents() {
           console.debug('[flood] getFloodEventById detail:', detail)
           store.setSelectedFlood(detail)
           store.setActiveTab('flood')
-
           // Draw road segment from WKT
           renderRoadSegmentFromDetail(detail[0])
         } finally {
@@ -412,7 +441,6 @@ async function renderFloodEvents() {
         console.debug('[flood] getFloodEventById detail:', detail)
         store.setSelectedFlood(detail)
         store.setActiveTab('flood')
-
         // Draw road segment from WKT
         renderRoadSegmentFromDetail(detail)
       } finally {
@@ -435,9 +463,8 @@ async function renderFloodEvents() {
 async function renderLayers() {
   ensureMap()
   await Promise.all([renderStops(), renderFloodEvents()])
-
-  // Optional: keep the mocked driving route for demo
-  //renderMockDriveRoute()
+  // Optional
+  // renderMockDriveRoute()
 }
 
 onMounted(renderLayers)
@@ -445,17 +472,15 @@ onMounted(renderLayers)
 /**
  * Key watchers:
  * 1) When layer visibility toggles (Home.vue activateStops/activateFlood), re-render.
- * 2) When activeTab changes, also re-render (defensive: some flows only flip tab).
+ * 2) When activeTab changes, also re-render.
  * 3) When selection is cleared elsewhere, remove the road segment layer.
  */
-
 
 let _mutex = false
 watch(
   () => [store.layers.stops, store.layers.floodEvents] as const,
   ([stops, floods], [prevStops, prevFloods]) => {
     if (_mutex) return
-
     if (stops && floods) {
       _mutex = true
       if (stops !== prevStops) {
@@ -470,8 +495,6 @@ watch(
       }
       _mutex = false
     }
-
-
     queueMicrotask(() => {
       console.debug('[layers] visibility changed:', { stops, floods })
       renderLayers()
@@ -486,9 +509,6 @@ watch(() => store.activeTab, () => {
 }, { deep: false })
 
 watch(() => store.selectedFlood, v => { if (!v) clearRoadSegment() }, { deep: false })
-
-
-
 
 let originMarker: L.Layer | null = null
 let destMarker: L.Layer | null = null
@@ -540,11 +560,9 @@ watch(() => store.busTripOverlay, (o) => {
   busRouteLayer = group.addTo(map)
 }, { deep: true })
 
-
 watch(() => store._mapFlyTo, (c) => {
   if (!c) return
   map.flyTo([c.lat, c.lon], Math.max(map.getZoom(), 14), { duration: 0.6 })
-  // clear
   store._mapFlyTo = null as any
 })
 
@@ -554,7 +572,6 @@ watch(() => store._fitOverlayTick, () => {
   if (b && b.isValid()) map.fitBounds(b.pad(0.12))
 })
 
-
 // === 3) Bus service route (by ServiceNo, both directions)
 let serviceRouteLayer: L.LayerGroup | null = null
 function clearServiceRoute() {
@@ -562,28 +579,31 @@ function clearServiceRoute() {
   serviceRouteLayer = null
 }
 
+/* Prefer colored polylines (with flooded segments red). Fallback to your old renderer. */
 watch(() => (store as any).serviceRouteOverlay, (o) => {
+  // If upstream provided per-segment colors, use them (handles flooded red).
+  if (Array.isArray(o?.polylines) && o.polylines.length) {
+    setColoredPolylines(o.polylines)
+    if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
+    return
+  }
+
+  // Otherwise draw a single color per direction (existing behavior)
   clearServiceRoute()
   if (!o) return
   const group = L.layerGroup()
   const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444']
 
   o.directions.forEach((d: any, idx: number) => {
-    
     const color = colors[idx % colors.length]
     const latlngs = (d.roadPath ?? d.points).map((p: [number, number]) => L.latLng(p[0], p[1]))
 
     if (Array.isArray(d.roadPath) && d.roadPath.length >= 2) {
-      // latlngs = d.roadPath.map(([lat,lon]:[number,number]) => [lat,lon])
       group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96 }))
-    } else {
-      // latlngs = (d.points || []).map(([lat,lon]:[number,number]) => [lat,lon])
-      if (latlngs.length >= 2) {
-        group.addLayer(L.polyline(latlngs, { color, weight: 4, opacity: 0.85, dashArray: '6,6' }))
-      }
+    } else if (latlngs.length >= 2) {
+      group.addLayer(L.polyline(latlngs, { color, weight: 4, opacity: 0.85, dashArray: '6,6' }))
     }
 
-    // Start and end points (optional)
     if (latlngs.length) {
       group.addLayer(L.circleMarker(latlngs[0], { radius: 5, color: '#2563eb', weight: 2 }))
       group.addLayer(L.circleMarker(latlngs[latlngs.length-1], { radius: 5, color: '#16a34a', weight: 2 }))
@@ -594,7 +614,6 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
   const b = (group as any).getBounds?.()
   if (b && b.isValid()) map.fitBounds(b.pad(0.12))
 }, { deep: true })
-
 
 </script>
 
