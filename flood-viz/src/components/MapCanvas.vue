@@ -36,7 +36,7 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
     const latlngs = seg.path.map(([lat, lon]) => [lat, lon] as [number, number])
     const layer = L.polyline(latlngs, {
       color: seg.color,      // <-- flooded are red (#dc2626), normal blue (#2563eb) from upstream
-      weight: 5,
+      weight: 8, // was 5
       opacity: 0.92,
       lineCap: 'round',
       lineJoin: 'round',
@@ -143,7 +143,7 @@ function renderRoadSegmentFromDetail(detail: any) {
   const group = L.layerGroup()
   const baseStyle: L.PolylineOptions = {
     color: '#1d4ed8',
-    weight: 5,
+    weight: 8, //was 5
     opacity: 0.9,
     dashArray: '8,6',
   }
@@ -326,7 +326,7 @@ function renderMockDriveRoute() {
   for (const seg of mockDriveTrip.segments) {
     const latlngs = toLatLngs(seg.geometry.coordinates)
     const color = seg.flooded ? '#ef4444' : '#16a34a'
-    const poly = L.polyline(latlngs, { color, weight: 5, opacity: 0.9 })
+    const poly = L.polyline(latlngs, { color, weight: 8, opacity: 0.9 })
 
     const meta = {
       segment_id: seg.segment_id,
@@ -551,7 +551,7 @@ watch(() => store.busTripOverlay, (o) => {
   // Draw a line for each segment
   for (const seg of o.lines) {
     const poly = L.polyline([[seg.from[0], seg.from[1]], [seg.to[0], seg.to[1]]], {
-      color: '#111827', weight: 4, opacity: 0.9, dashArray: '6,6'
+      color: '#111827', weight: 6, opacity: 0.9, dashArray: '6,6'
     })
     poly.bindTooltip(`Seg ${seg.meta?.id ?? ''}`, { sticky: true })
     group.addLayer(poly)
