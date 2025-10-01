@@ -1,37 +1,63 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAppStore } from '@/store/app'
 
 const store = useAppStore()
-const s = computed<any>(() => store.selectedFlood || {})
 
+// Toggle if you ever want the raw JSON back
+const showDebug = ref(false)
+
+/** Normalize: sometimes API = object, sometimes = [object] */
+const flood = computed<any>(() => {
+  const f = store.selectedFlood
+  if (!f) return {}
+  return Array.isArray(f) ? (f[0] ?? {}) : f
+})
+
+/** Safe getters */
 const title = computed(() =>
-  s.value.flooded_location || s.value.title || s.value.name || 'Flood details'
+  flood.value.flooded_location || flood.value.title || flood.value.name || 'Flood details'
 )
 const idText = computed(() =>
-  s.value.flood_id ?? s.value.id ?? s.value.flood_event_id ?? s.value.event_id ?? ''
+  flood.value.flood_id ?? flood.value.id ?? flood.value.flood_event_id ?? flood.value.event_id ?? ''
 )
-const date = computed(() => s.value.date ?? '')
+const date = computed(() => flood.value.date ?? '')
+
 const lat = computed(() =>
-  s.value.latitude ?? s.value.lat ?? s.value.center_lat ?? s.value.geom?.coordinates?.[1]
+  flood.value.latitude ?? flood.value.lat ?? flood.value.center_lat ?? flood.value.geom?.coordinates?.[1] ?? null
 )
 const lon = computed(() =>
-  s.value.longitude ?? s.value.lon ?? s.value.center_lon ?? s.value.lng ?? s.value.geom?.coordinates?.[0]
+  flood.value.longitude ?? flood.value.lon ?? flood.value.center_lon ?? flood.value.lng ?? flood.value.geom?.coordinates?.[0] ?? null
 )
 
-const daily = computed(() => s.value['daily rainfall total (mm)'])
-const r30 = computed(() => s.value['highest 30 min rainfall (mm)'])
-const r60 = computed(() => s.value['highest 60 min rainfall (mm)'])
-const r120 = computed(() => s.value['highest 120 min rainfall (mm)'])
-const meanPr = computed(() => s.value.mean_pr)
+/** Rainfall */
+const daily = computed(() => flood.value['daily rainfall total (mm)'])
+const r30 = computed(() => flood.value['highest 30 min rainfall (mm)'])
+const r60 = computed(() => flood.value['highest 60 min rainfall (mm)'])
+const r120 = computed(() => flood.value['highest 120 min rainfall (mm)'])
+const meanPr = computed(() => flood.value.mean_pr)
 
-// New: road segment fields from the API response of getFloodEventById
-const roadName = computed(() => s.value.road_name)
-const roadType = computed(() => s.value.road_type)
+/** Road segment */
+const roadName = computed(() => flood.value.road_name)
+const roadType = computed(() => flood.value.road_type)
 const lengthKm = computed(() => {
-  const m = Number(s.value.length_m)
-  return isFinite(m) ? (m / 1000).toFixed(3) : null
+  const m = Number(flood.value.length_m)
+  return Number.isFinite(m) ? (m / 1000) : null
 })
+
+/** Traffic impact (format to 2 d.p. minutes) */
+const t20 = computed(() => to2dp(flood.value.time_20kmh_min))
+const t50 = computed(() => to2dp(flood.value.time_50kmh_min))
+const delay = computed(() => to2dp(flood.value.time_travel_delay_min))
+
+function to2dp(x: any) {
+  const n = Number(x)
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null
+}
+
+/** Display friendly lat/lon */
+const latText = computed(() => (lat.value == null ? null : Number(lat.value).toFixed(6)))
+const lonText = computed(() => (lon.value == null ? null : Number(lon.value).toFixed(6)))
 </script>
 
 <template>
@@ -47,38 +73,112 @@ const lengthKm = computed(() => {
     </div>
 
     <div v-else>
-      <div class="flex items-center justify-between mb-2">
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-3">
         <div>
           <div class="font-semibold">{{ title }}</div>
           <div class="text-xs text-gray-500" v-if="idText">ID: {{ idText }}</div>
           <div class="text-xs text-gray-500" v-if="date">Date: {{ date }}</div>
         </div>
-        <button class="text-xs text-gray-500 hover:text-gray-700" @click="store.clearSelection()">clear</button>
-      </div>
-
-      <div class="text-xs text-gray-600 space-y-1 mb-2">
-        <div v-if="lat != null && lon != null">Location: {{ lat }}, {{ lon }}</div>
-        <div v-if="daily != null">Daily rainfall (mm): {{ daily }}</div>
-        <div v-if="r30 != null">Highest 30 min (mm): {{ r30 }}</div>
-        <div v-if="r60 != null">Highest 60 min (mm): {{ r60 }}</div>
-        <div v-if="r120 != null">Highest 120 min (mm): {{ r120 }}</div>
-        <div v-if="meanPr != null">Mean PR: {{ meanPr }}</div>
-
-        <!-- New: show road segment info if available -->
-        <div class="pt-2 border-t border-gray-100 mt-2" v-if="roadName || roadType || lengthKm">
-          <div class="text-gray-500">Road segment</div>
-          <div v-if="roadName">Road: {{ roadName }}</div>
-          <div v-if="roadType">Type: {{ roadType }}</div>
-          <div v-if="lengthKm != null">Length: {{ lengthKm }} km</div>
+        <div class="flex items-center gap-2">
+          <button v-if="showDebug" class="text-xs text-gray-500 hover:text-gray-700"
+                  @click="showDebug = !showDebug">
+            {{ showDebug ? 'Hide raw data' : 'Show raw data' }}
+          </button>
+          <button class="text-xs text-gray-500 hover:text-gray-700" @click="store.clearSelection()">clear</button>
         </div>
       </div>
 
-      <details class="mt-3">
-        <summary class="cursor-pointer text-xs text-gray-500">Raw</summary>
-        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-auto">
-{{ JSON.stringify(store.selectedFlood, null, 2) }}
-        </pre>
-      </details>
+      <!-- Event -->
+      <div class="mb-3">
+        <div class="font-medium text-gray-700 mb-1">Event</div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-xs text-left text-gray-700 border">
+            <tbody>
+              <tr v-if="latText && lonText">
+                <th class="border px-2 py-1 w-48 bg-gray-50">Location</th>
+                <td class="border px-2 py-1">{{ latText }}, {{ lonText }}</td>
+              </tr>
+              <tr v-if="daily != null">
+                <th class="border px-2 py-1 bg-gray-50">Daily rainfall</th>
+                <td class="border px-2 py-1">{{ daily }} mm</td>
+              </tr>
+              <tr v-if="r30 != null">
+                <th class="border px-2 py-1 bg-gray-50">Highest 30 min</th>
+                <td class="border px-2 py-1">{{ r30 }} mm</td>
+              </tr>
+              <tr v-if="r60 != null">
+                <th class="border px-2 py-1 bg-gray-50">Highest 60 min</th>
+                <td class="border px-2 py-1">{{ r60 }} mm</td>
+              </tr>
+              <tr v-if="r120 != null">
+                <th class="border px-2 py-1 bg-gray-50">Highest 120 min</th>
+                <td class="border px-2 py-1">{{ r120 }} mm</td>
+              </tr>
+              <tr v-if="meanPr != null">
+                <th class="border px-2 py-1 bg-gray-50">Mean PR</th>
+                <td class="border px-2 py-1">{{ meanPr }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Road Segment -->
+      <div v-if="roadName || roadType || lengthKm != null" class="mb-3">
+        <div class="font-medium text-gray-700 mb-1">Road segment</div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-xs text-left text-gray-700 border">
+            <tbody>
+              <tr v-if="roadName">
+                <th class="border px-2 py-1 w-48 bg-gray-50">Road name</th>
+                <td class="border px-2 py-1">{{ roadName }}</td>
+              </tr>
+              <tr v-if="roadType">
+                <th class="border px-2 py-1 bg-gray-50">Type</th>
+                <td class="border px-2 py-1">{{ roadType }}</td>
+              </tr>
+              <tr v-if="lengthKm != null">
+                <th class="border px-2 py-1 bg-gray-50">Length</th>
+                <td class="border px-2 py-1">{{ lengthKm.toFixed(3) }} km</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Traffic Impact -->
+      <div v-if="t20 != null || t50 != null || delay != null">
+        <div class="font-medium text-gray-700 mb-1">Traffic impact</div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-xs text-left text-gray-700 border">
+            <tbody>
+              <tr v-if="t20 != null">
+                <th class="border px-2 py-1 w-48 bg-gray-50">Time @ 20 km/h</th>
+                <td class="border px-2 py-1">{{ t20 }} min</td>
+              </tr>
+              <tr v-if="t50 != null">
+                <th class="border px-2 py-1 bg-gray-50">Time @ 50 km/h</th>
+                <td class="border px-2 py-1">{{ t50 }} min</td>
+              </tr>
+              <tr v-if="delay != null">
+                <th class="border px-2 py-1 bg-gray-50">Travel delay</th>
+                <td class="border px-2 py-1">{{ delay }} min</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Optional raw JSON (off by default) -->
+      <div v-if="showDebug" class="mt-3">
+        <details>
+          <summary class="cursor-pointer text-xs text-gray-500">Show raw data</summary>
+          <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-auto">
+{{ JSON.stringify(flood, null, 2) }}
+          </pre>
+        </details>
+      </div>
     </div>
   </div>
 </template>
