@@ -26,21 +26,21 @@ function activateFlood() {
     <div class="col-span-3 space-y-4">
       <div class="bg-white rounded shadow p-2">
         <div class="flex gap-2">
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">mobility</button>
+          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Mobility</button>
           <button
             class="px-3 py-1 rounded-full text-sm"
             :class="store.activeTab === 'stops' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
             @click="activateStops"
           >
-            stops
+            Stops
           </button>
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">routes</button>
+          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Routes</button>
           <button
             class="px-3 py-1 rounded-full text-sm"
             :class="store.activeTab === 'flood' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
             @click="activateFlood"
           >
-            flood
+            Flood
           </button>
         </div>
       </div>
