@@ -3,11 +3,13 @@ from flask import jsonify, request
 import osmnx as ox
 import os
 from collections import Counter
+import pandas as pd
+import json
+from shapely import wkb
 
+flood_events_df = pd.read_csv("flood_events_rows.csv")
 graph_path = "sg_bus_network.graphml"  
 G = ox.load_graphml(graph_path)
-
-
 
 def get_all_flood_events():
     response = supabase.table('flood_events').select('*').execute()
@@ -28,36 +30,34 @@ def get_flood_event_by_id():
 
     result = []
     try:
-        # Load the graph once, not inside the loop (better performance)
+        df = pd.read_csv("flood_events_rows.csv")
         G = ox.load_graphml("sg_bus_network.graphml")
 
         for flood_event_id in flood_event_ids:
-            # Fetch flood event
-            response = supabase.table('flood_events').select('*').eq('flood_id', flood_event_id).execute()
-            if not response.data or len(response.data) == 0:
+            flood_event_row = df[df['flood_id'] == flood_event_id]
+            if flood_event_row.empty:
                 continue  
 
-            flood_event = response.data[0]
-            flood_lat = flood_event.get('geom').get('coordinates')[1]
-            flood_lon = flood_event.get('geom').get('coordinates')[0]
+            try:
+                geom_str = flood_event_row.iloc[0]['geom']
+                geom = wkb.loads(bytes.fromhex(geom_str)) 
+                flood_lat = geom.y
+                flood_lon = geom.x
+            except Exception as e:
+                return jsonify({'error': f"Could not parse geom for flood_id {flood_event_id}: {e}"}), 500
 
-            # Find nearest road segment
             nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
             u, v, key = nearest_edge[0]
             edge_data = G.get_edge_data(u, v, key)
 
-            # Get road length in meters
             road_length_m = edge_data.get('length', 0)
 
-            # Convert speed from km/h to m/s
-            speed_50_kmh = 50 * 1000 / 3600  # 50 km/h = 13.89 m/s
-            speed_20_kmh = 20 * 1000 / 3600  # 20 km/h = 5.56 m/s
+            speed_50_kmh = 50 * 1000 / 3600
+            speed_20_kmh = 20 * 1000 / 3600
 
-            # Calculate travel time in seconds
             time_50_kmh_sec = road_length_m / speed_50_kmh if speed_50_kmh > 0 else None
             time_20_kmh_sec = road_length_m / speed_20_kmh if speed_20_kmh > 0 else None
 
-            # Convert to minutes for easier interpretation
             time_50_kmh_min = round(time_50_kmh_sec / 60, 2) if time_50_kmh_sec else None
             time_20_kmh_min = round(time_20_kmh_sec / 60, 2) if time_20_kmh_sec else None
 
@@ -68,7 +68,7 @@ def get_flood_event_by_id():
                 'length_m': round(road_length_m, 2),
                 'time_50kmh_min': time_50_kmh_min,
                 'time_20kmh_min': time_20_kmh_min,
-                'time_travel_delay_min': time_20_kmh_min - time_50_kmh_min if time_50_kmh_min and time_20_kmh_min else None,
+                'time_travel_delay_min': (time_20_kmh_min - time_50_kmh_min) if (time_50_kmh_min and time_20_kmh_min) else None,
                 'geometry': str(edge_data.get('geometry'))
             })
 
@@ -89,8 +89,6 @@ def get_flood_events_by_location():
 
         locations = [event['flooded_location'] for event in response.data if event.get('flooded_location')]
         location_counts = Counter(locations)
-
-        # Sort and return as a list of dicts
         sorted_locations = sorted(location_counts.items(), key=lambda x: x[1], reverse=True)
 
         result = [{loc: count} for loc, count in sorted_locations]
