@@ -81,10 +81,13 @@ function clearLayer(layer: L.Layer | null) { if (layer && map) map.removeLayer(l
 function clearStopsOverlays() {
   if (stopsLayer) { map.removeLayer(stopsLayer); stopsLayer = null }
   if (lastSelectedStopMarker) lastSelectedStopMarker = null
+  map?.closePopup?.() // also hide any open popups
 }
 function clearFloodOverlays() {
   if (floodEventsLayer) { map.removeLayer(floodEventsLayer); floodEventsLayer = null }
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
+  map?.closePopup?.()
+  ++detailEpoch // invalidate any in-flight flood-detail renders
 }
 function clearAllRouteOverlays() {
   if (busRouteLayer) { map.removeLayer(busRouteLayer); busRouteLayer = null }
@@ -167,6 +170,7 @@ function pickFloodFields(e: any) {
 /*                   E P O C H  –  C A N C E L  S T A L E                */
 /* ===================================================================== */
 let renderEpoch = 0
+let detailEpoch = 0 // NEW: cancels in-flight flood detail renders
 type Mode = 'stops' | 'flood' | null
 const getMode = (): Mode => (store.layers.stops ? 'stops' : store.layers.floodEvents ? 'flood' : null)
 
@@ -217,10 +221,11 @@ async function renderFloodEvents(epoch: number) {
       })
       layer.on('click', async () => {
         store.setSelectedFloodLoading(true)
+        const dEpoch = detailEpoch // NEW
         try {
           store.selectFlood(picked.id)
           const detail = await getFloodEventById(Number(picked.id))
-          if (epoch !== renderEpoch) return
+          if (dEpoch !== detailEpoch) return // NEW: switched away
           store.setSelectedFlood(detail)
           store.setActiveTab('flood')
           renderRoadSegmentFromDetail(detail[0])
@@ -237,10 +242,11 @@ async function renderFloodEvents(epoch: number) {
     }).bindTooltip(`<strong>${picked.name}</strong>`, { sticky: true })
     marker.on('click', async () => {
       store.setSelectedFloodLoading(true)
+      const dEpoch = detailEpoch // NEW
       try {
         store.selectFlood(picked.id)
         const detail = await getFloodEventById(Number(picked.id))
-        if (epoch !== renderEpoch) return
+        if (dEpoch !== detailEpoch) return // NEW
         store.setSelectedFlood(detail)
         store.setActiveTab('flood')
         renderRoadSegmentFromDetail(detail)
@@ -258,6 +264,7 @@ async function renderFloodEvents(epoch: number) {
 async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
+  ++detailEpoch // NEW: cancel any in-flight flood-detail operations
 
   // Always clear everything first
   clearAllRouteOverlays()
