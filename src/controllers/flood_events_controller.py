@@ -2,6 +2,7 @@ from src.database import supabase
 from flask import jsonify, request
 import osmnx as ox
 import os
+from collections import Counter
 
 graph_path = "sg_bus_network.graphml"  
 G = ox.load_graphml(graph_path)
@@ -78,4 +79,24 @@ def get_flood_event_by_id():
         return jsonify({'error': 'Flood event(s) not found'}), 404
 
     return jsonify(result), 200
+
+def get_flood_events_by_location():
+    try:
+        response = supabase.table('flood_events').select('flooded_location').execute()
+        
+        if not response.data:
+            return jsonify({"error": "No flood events found"}), 404
+
+        locations = [event['flooded_location'] for event in response.data if event.get('flooded_location')]
+        location_counts = Counter(locations)
+
+        # Sort and return as a list of dicts
+        sorted_locations = sorted(location_counts.items(), key=lambda x: x[1], reverse=True)
+
+        result = [{loc: count} for loc, count in sorted_locations]
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 

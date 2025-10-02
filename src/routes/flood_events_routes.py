@@ -1,5 +1,5 @@
 from flask import Blueprint
-from src.controllers.flood_events_controller import get_all_flood_events, get_flood_event_by_id
+from src.controllers.flood_events_controller import get_all_flood_events, get_flood_event_by_id, get_flood_events_by_location
 from flasgger import swag_from
 from ..examples_for_doc.flooded_events_api import *
 from ..examples_for_doc.flooded_events_schemas import *
@@ -84,3 +84,7 @@ def all_flood_events():
 def flood_event_by_id():
 
     return get_flood_event_by_id()
+
+@flood_events_route.route('/flood_events/location', methods=['GET'])
+def flood_event_by_location():
+    return get_flood_events_by_location()

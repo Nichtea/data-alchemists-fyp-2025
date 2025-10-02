@@ -5,12 +5,14 @@ import requests
 import json
 import googlemaps
 from datetime import datetime
+from dotenv import load_dotenv
 
+load_dotenv()
 
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
-ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY")  # Set this in your environment
-gmaps = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
+ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
+gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
 
 def get_bus_trip_segment_by_stop(start_stop, end_stop):
     try:
@@ -93,7 +95,7 @@ def get_onemap_route():
                             leg["30kmh_flooded_bus_duration"]= delay_json.get('30kmh_flooded_bus_duration'),
                             leg["48kmh_flooded_bus_duration"]= delay_json.get('48kmh_flooded_bus_duration')
                             leg['overall_bus_route_status'] = "flooded"
-                            print(f"Added non_flooded_bus_duration: {leg['non_flooded_bus_duration']} for leg from {start_stop_id} to {end_stop_id}")
+                            print("Added time travel delay info")
 
         if response.status_code != 200:
             return jsonify({
