@@ -340,6 +340,18 @@ watch(() => store.busTripOverlay, (o) => {
   busRouteLayer = group.addTo(map)
 }, { deep: true })
 
+/** Fit to arbitrary coordinates pushed by the panel */
+watch(() => (store as any)._fitBoundsCoords, (coords) => {
+  if (!coords || !Array.isArray(coords) || !coords.length) return;
+  try {
+    const b = L.latLngBounds(coords as any);
+    if (b.isValid()) map.fitBounds(b.pad(0.12));
+  } finally {
+    // reset so future clicks work again
+    (store as any)._fitBoundsCoords = null;
+  }
+}, { deep: false });
+
 watch(() => (store as any).serviceRouteOverlay, (o) => {
   if (!o) {
     if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
