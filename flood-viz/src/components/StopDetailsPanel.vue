@@ -19,25 +19,6 @@ function toLonLat(p: [number, number]) {
   return `${lon},${lat}`
 }
 
-/** Zoom the map to this direction’s geometry (roadPath preferred) */
-function viewDirectionOnMap(d: {
-  roadPath?: [number, number][],
-  points?: [number, number][]
-}) {
-  const coords = (Array.isArray(d?.roadPath) && d.roadPath.length >= 2)
-    ? d.roadPath
-    : (Array.isArray(d?.points) && d.points.length >= 2)
-      ? d.points
-      : [];
-
-  if (!coords.length) return;
-
-  // send the coords to the map; the map watches this and fits bounds
-  (store as any)._fitBoundsCoords = coords;
-  (store as any).setActiveTab?.('stops');
-}
-
-
 async function buildServiceIndex(): Promise<ServiceDirStops> {
   if (SERVICE_INDEX_PROMISE) return SERVICE_INDEX_PROMISE
   SERVICE_INDEX_PROMISE = (async () => {
@@ -673,72 +654,6 @@ async function queryBestBusRoute() {
   ;(store as any).fitToOverlayBounds?.()
 }
 
-/** Draw service route (for live arrivals “Show route” button) */
-async function drawServiceRoute(serviceNo: string) {
-  if (!serviceNo) return
-
-  if (currentRouteAbort) currentRouteAbort.abort()
-  currentRouteAbort = new AbortController()
-  const { signal } = currentRouteAbort
-
-  const routes = await getBusRoutes(serviceNo)
-  if (!Array.isArray(routes) || routes.length === 0) {
-    alert(`No route found for service ${serviceNo}`)
-    return
-  }
-
-  const byDir = new Map<number, any[]>()
-  for (const r of routes) {
-    const dir = Number(r.Direction ?? r.direction ?? 1)
-    if (!byDir.has(dir)) byDir.set(dir, [])
-    byDir.get(dir)!.push(r)
-  }
-
-  const directions: Array<any> = []
-  for (const [dir, arr] of byDir.entries()) {
-    arr.sort((a,b) => Number(a.StopSequence) - Number(b.StopSequence))
-    const points: [number,number][] = []
-    const stopCodes: string[] = []
-    for (const row of arr) {
-      const code = String(row.BusStopCode ?? row.busStopCode ?? '')
-      const p = stopIndexByCode.value[code]
-      if (p && Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
-        points.push([p.lat, p.lon])
-        stopCodes.push(code)
-      }
-    }
-    if (points.length >= 2) directions.push({ dir, points, stopCodes })
-  }
-
-  if (!directions.length) {
-    alert(`Service ${serviceNo}: no plottable points`)
-    return
-  }
-
-  ;(store as any).setServiceRouteOverlay?.({ serviceNo, directions })
-
-  await Promise.all(directions.map(async (d) => {
-    try {
-      const estimatedLen = d.points.length * 24
-      const useChunked = estimatedLen > 7000
-      const res = useChunked
-        ? await osrmRouteViaChunked(d.points, 90, signal)
-        : await osrmRouteVia(d.points, signal).catch(() => osrmRouteViaChunked(d.points, 90, signal))
-
-      if (res && res.path.length >= 2) {
-        ;(d as any).roadPath = res.path
-        ;(d as any).distance_m = res.distance_m
-        ;(d as any).duration_s = res.duration_s
-      }
-    } catch {}
-  }))
-
-  ;(store as any).setServiceRouteOverlay?.({
-    serviceNo,
-    directions: directions.map(d => ({ ...d }))
-  })
-}
-
 /** ---------- lifecycle ---------- */
 onMounted(async () => {
   const rows = await getAllBusStops()
@@ -752,7 +667,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="bg-white rounded shadow p-3 relative z-[12000]">
+  <div class="bg-white rounded shadow p-3">
     <div class="text-base font-semibold mb-2">Stops</div>
 
     <div class="space-y-2 mb-3">
@@ -945,7 +860,7 @@ onMounted(async () => {
                 </div>
               </div>
               <button class="rounded-md border px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                      @click="viewDirectionOnMap(d)">
+                      @click="store.fitToOverlayBounds()" title="Zoom to route">
                 Fit to route
               </button>
             </div>
@@ -1017,7 +932,7 @@ onMounted(async () => {
 
               <div class="mt-3 flex items-center gap-2">
                 <button class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-                        @click="viewDirectionOnMap(d)">
+                        @click="store.fitToOverlayBounds()">
                   View on map
                 </button>
                 <button class="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100"
