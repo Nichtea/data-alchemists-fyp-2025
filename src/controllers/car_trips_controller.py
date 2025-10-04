@@ -133,6 +133,34 @@ def get_onemap_car_route():
                 "status_code": response.status_code,
                 "details": response.text
             }), response.status_code
+        
+        data['overall_route_status'] = "clear"
+
+        tolerance = 0.0018  # 180m radius, adjust as needed
+        supabase_response = supabase.table("car_trips").select("*") \
+            .gte("start_lat", start_lat - tolerance) \
+            .lte("start_lat", start_lat + tolerance) \
+            .gte("start_lon", start_lon - tolerance) \
+            .lte("start_lon", start_lon + tolerance) \
+            .gte("end_lat", end_lat - tolerance) \
+            .lte("end_lat", end_lat + tolerance) \
+            .gte("end_lon", end_lon - tolerance) \
+            .lte("end_lon", end_lon + tolerance) \
+            .execute()
+
+        if supabase_response.data and len(supabase_response.data) > 0:
+            trip = supabase_response.data[0]  # take first match
+            time_travel_simulation = {
+                "81kph_total_duration": trip.get("81kph_total_duration"),
+                "72kph_total_duration": trip.get("72kph_total_duration"),
+                "45kph_total_duration": trip.get("45kph_total_duration"),
+                "20kph_total_duration": trip.get("20kph_total_duration"),
+                "10kph_total_duration": trip.get("10kph_total_duration"),
+                "5kph_total_duration": trip.get("5kph_total_duration"),
+                "90kph_total_duration": trip.get("90kph_total_duration"),
+            }
+            data['overall_route_status'] = "flooded"
+            data["time_travel_simulation"] = time_travel_simulation
 
         return jsonify(data), 200
 
