@@ -5,6 +5,7 @@ import os
 from collections import Counter
 import pandas as pd
 import json
+from datetime import datetime
 import requests
 from shapely import wkb
 from dotenv import load_dotenv
@@ -165,4 +166,63 @@ def get_buses_affected_by_floods():
         "affected_bus_services": sorted(list(affected_services))
     }), 200
 
+def get_flood_events_by_date_range():
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date parameters are required"}), 400
+
+    try:
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    if start_date > end_date:
+        return jsonify({"error": "start_date cannot be after end_date"}), 400
+
+    try:
+        flood_events_df['date'] = pd.to_datetime(flood_events_df['date'])
+    except Exception:
+        return jsonify({"error": "Could not parse flood_date column as datetime"}), 500
+
+    filtered_df = flood_events_df[
+        (flood_events_df['date'] >= start_date) &
+        (flood_events_df['date'] <= end_date)
+    ]
+
+    if filtered_df.empty:
+        return jsonify({"message": "No flood events found for the given date range"}), 200
+
+    result = filtered_df.to_dict(orient='records')
+    for item in result:
+        geom_str = item['geom']
+        geom = wkb.loads(bytes.fromhex(geom_str)) 
+        flood_lat = geom.y
+        flood_lon = geom.x
+        nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
+        u, v, key = nearest_edge[0]
+        edge_data = G.get_edge_data(u, v, key)
+
+        road_length_m = edge_data.get('length', 0)
+
+        speed_50_kmh = 50 * 1000 / 3600
+        speed_20_kmh = 20 * 1000 / 3600
+
+        time_50_kmh_sec = road_length_m / speed_50_kmh if speed_50_kmh > 0 else None
+        time_20_kmh_sec = road_length_m / speed_20_kmh if speed_20_kmh > 0 else None
+
+        time_50_kmh_min = round(time_50_kmh_sec / 60, 2) if time_50_kmh_sec else None
+        time_20_kmh_min = round(time_20_kmh_sec / 60, 2) if time_20_kmh_sec else None
+
+        item['road_name'] = edge_data.get('name', 'Unknown')
+        item['road_type'] = edge_data.get('highway', 'Unknown')
+        item['length_m'] = round(road_length_m, 2)
+        item['time_50kmh_min'] = time_50_kmh_min
+        item['time_20kmh_min'] = time_20_kmh_min
+        item['time_travel_delay_min'] = (time_20_kmh_min - time_50_kmh_min) if (time_50_kmh_min and time_20_kmh_min) else None
+        item['geometry'] = str(edge_data.get('geometry'))
+        
+    return jsonify(result), 200
 
