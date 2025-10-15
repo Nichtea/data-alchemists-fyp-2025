@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, watch, ref } from 'vue'
+import { onMounted, watch, ref, computed } from 'vue'
 import * as L from 'leaflet'
 import { useAppStore } from '@/store/app'
 import {
   getAllBusStops, getBusStopByCode,
   getAllFloodEvents, getFloodEventById,
 } from '@/api/api'
+
 
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
@@ -516,23 +517,26 @@ function setRouteEndpoints(start: {lat:number, lon:number} | null, end: {lat:num
   }
 }
 
-/* Central authoritative renderer */
 async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
   ++detailEpoch
 
-  clearAllRouteOverlays()
-  clearStopsOverlays()
-  clearFloodOverlays()
-
+  // Only touch the layers that are toggleable
   if (store.layers.stops) {
-    store.layers.floodEvents = false
     await renderStops(epoch)
-  } else if (store.layers.floodEvents) {
-    store.layers.stops = false
-    await renderFloodEvents(epoch)
+  } else {
+    clearStopsOverlays()
   }
+
+  if (store.layers.floodEvents) {
+    await renderFloodEvents(epoch)
+  } else {
+    clearFloodOverlays()
+  }
+
+  // NOTE: Do NOT call clearAllRouteOverlays() here;
+  // routes (serviceRouteLayer / coloredPolylinesGroup / endpoints) should persist.
 }
 
 /* =================== Layer toggle Leaflet control =================== */

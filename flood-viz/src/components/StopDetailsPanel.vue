@@ -4,6 +4,8 @@ import { useAppStore } from '@/store/app'
 import { geocodeSG, type Coords } from '@/lib/geocode'
 import { getAllBusStops, getBusStopByCode, getBusTripsDelay, getOneMapPtRoute } from '@/api/api'
 
+
+// ────────────────────────────────────────────────────────────────────────────────
 const store = useAppStore()
 
 let BUS_ROUTES_CACHE: any[] | null = null
@@ -36,7 +38,6 @@ function viewDirectionOnMap(d: {
   (store as any)._fitBoundsCoords = coords;
   (store as any).setActiveTab?.('stops');
 }
-
 
 async function buildServiceIndex(): Promise<ServiceDirStops> {
   if (SERVICE_INDEX_PROMISE) return SERVICE_INDEX_PROMISE
@@ -428,8 +429,6 @@ function summarizeFloodDurations(legs: any[]) {
 /** Compute TOTAL itinerary time (overall) for a given scenario */
 function totalTimeMinutes(it: { duration_s: number, floodSummary?: { baseline_s?: number } }, scenarioDur_s: number) {
   const baselineBus = it.floodSummary?.baseline_s ?? 0
-  // base itinerary time is it.duration_s (includes walking, waiting, etc. under normal conditions)
-  // replace bus portion with scenario time => add the delta to base
   const total_s = it.duration_s + (scenarioDur_s - baselineBus)
   return Math.max(0, Math.round(total_s / 60))
 }
@@ -756,7 +755,6 @@ onMounted(async () => {
     <div class="text-base font-semibold mb-2">Stops</div>
 
     <div class="space-y-2 mb-3">
-      <!-- inputs omitted for brevity; unchanged -->
       <!-- Starts At -->
       <label class="block relative">
         <div class="text-xs text-gray-600 mb-1">Starts At</div>
@@ -831,41 +829,6 @@ onMounted(async () => {
                       title="Show this itinerary on the map">
                 {{ selectedItinIdx === idx ? 'Shown on map' : 'Show on map' }}
               </button>
-            </div>
-          </div>
-
-          <!-- TOTAL travel time per scenario + Δ -->
-          <div class="mt-2 rounded-md bg-gray-50 p-3 text-sm">
-            <div class="font-medium mb-1">Travel time scenarios</div>
-
-            <div class="text-gray-700">
-              Non-flooded: ~ {{ Math.round(it.duration_s / 60) }} min
-            </div>
-
-            <template v-if="it.floodSummary?.baseline_s !== undefined && it.floodSummary.scenarios?.length">
-              <ul class="mt-1 text-xs text-gray-600 space-y-0.5">
-                <li v-for="sc in it.floodSummary.scenarios" :key="sc.scenario">
-                  {{ sc.scenario }}: ~ {{ totalTimeMinutes(it, sc.duration_s) }} min
-                  <span class="text-[11px] text-gray-500">
-                    (Δ {{ Math.max(0, Math.round((sc.duration_s - (it.floodSummary?.baseline_s ?? 0)) / 60)) }} min)
-                  </span>
-                </li>
-              </ul>
-            </template>
-
-            <div v-else class="text-xs text-gray-500">
-              No travel delay
-            </div>
-
-            <div class="mt-2 flex items-center gap-4 text-xs text-gray-600">
-              <span class="inline-flex items-center gap-1">
-                <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: '#2563eb' }"></span>
-                Normal
-              </span>
-              <span class="inline-flex items-center gap-1">
-                <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: '#dc2626' }"></span>
-                Flooded segment
-              </span>
             </div>
           </div>
 
@@ -966,41 +929,6 @@ onMounted(async () => {
                 </div>
                 <div class="ml-auto text-xs text-gray-500">
                   geometry: {{ d.roadPath ? 'OSRM road' : 'stop-to-stop' }}
-                </div>
-              </div>
-
-              <!-- TOTAL times for the selected itinerary -->
-              <div class="mt-2 rounded-md bg-gray-50 p-3 text-sm">
-                <div class="font-medium mb-1">Travel time scenarios</div>
-
-                <div class="text-gray-700">
-                  Non-flooded: ~ {{ Math.round(d.duration_s / 60) }} min
-                </div>
-
-                <template v-if="d.floodSummary?.baseline_s !== undefined && d.floodSummary.scenarios?.length">
-                  <ul class="mt-1 text-xs text-gray-600 space-y-0.5">
-                    <li v-for="sc in d.floodSummary.scenarios" :key="sc.scenario">
-                      {{ sc.scenario }}: ~ {{ totalTimeMinutes(d, sc.duration_s) }} min
-                      <span class="text-[11px] text-gray-500">
-                        (Δ {{ Math.max(0, Math.round((sc.duration_s - (d.floodSummary?.baseline_s ?? 0)) / 60)) }} min)
-                      </span>
-                    </li>
-                  </ul>
-                </template>
-
-                <div v-else class="text-xs text-gray-500">
-                  No travel delay
-                </div>
-
-                <div class="mt-2 flex items-center gap-4 text-xs text-gray-600">
-                  <span class="inline-flex items-center gap-1">
-                    <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: (store as any).serviceRouteOverlay?.baseColor || '#2563eb' }"></span>
-                    Normal
-                  </span>
-                  <span class="inline-flex items-center gap-1">
-                    <span class="inline-block h-2 w-6 rounded" :style="{ backgroundColor: (store as any).serviceRouteOverlay?.floodedColor || '#dc2626' }"></span>
-                    Flooded segment
-                  </span>
                 </div>
               </div>
 

@@ -1,13 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue'              // ⬅ add this
 import { useAppStore } from '@/store/app'
 import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
 import FloodDetailsPanel from '@/components/FloodDetailsPanel.vue'
 import ControlsPanel from '@/components/ControlsPanel.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
+import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue' // ⬅ add this
 import { useUrlStateSync } from '@/components/useUrlStateSync'
 useUrlStateSync()
 
 const store = useAppStore()
+
+// Chart data = first direction of current serviceRouteOverlay (if it has floodSummary)
+const chartEntry = computed(() => {
+  const o: any = (store as any).serviceRouteOverlay
+  const d = o?.directions?.[0]
+  if (!d || !Number.isFinite(d.duration_s) || !d.floodSummary) return null
+  return { duration_s: Number(d.duration_s), floodSummary: d.floodSummary }
+})
 
 function activateStops() {
   store.setActiveTab('stops')
@@ -52,11 +62,21 @@ function activateFlood() {
         <ControlsPanel />
       </div>
     </div>
-
     <div class="col-span-9">
-      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2">
-        <MapCanvas />
-      </div>
+      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2 flex flex-col"> <!-- ⬅ add flex -->
+    <!-- Chart above the map -->
+    <div v-if="chartEntry" class="mb-2">
+      <TravelTimeBarChart :entry="chartEntry" title="Travel time scenarios" />
     </div>
+
+    <!-- Map fills remaining space -->
+    <div class="flex-1 min-h-0">
+      <MapCanvas />
+    </div>
+  </div>
+</div>
+
+
+  
   </div>
 </template>
