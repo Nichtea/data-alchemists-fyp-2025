@@ -170,7 +170,7 @@ function pickFloodFields(e: any) {
 /*                   E P O C H  –  C A N C E L  S T A L E                */
 /* ===================================================================== */
 let renderEpoch = 0
-let detailEpoch = 0 // NEW: cancels in-flight flood detail renders
+let detailEpoch = 0
 type Mode = 'stops' | 'flood' | null
 const getMode = (): Mode => (store.layers.stops ? 'stops' : store.layers.floodEvents ? 'flood' : null)
 
@@ -179,7 +179,7 @@ async function renderStops(epoch: number) {
   clearStopsOverlays()
   if (!store.layers.stops) return
   const stops = await getAllBusStops()
-  if (epoch !== renderEpoch) return // stale result
+  if (epoch !== renderEpoch) return
   const group = L.layerGroup()
   for (const raw of stops as any[]) {
     const { lat, lon, name, code } = pickStopFields(raw)
@@ -217,15 +217,15 @@ async function renderFloodEvents(epoch: number) {
     if (picked.hasGeometry && picked.geometry) {
       const feature = { type: 'Feature', geometry: picked.geometry, properties: { name: picked.name, id: picked.id } }
       const layer = L.geoJSON(feature as any, {
-        style: (): L.PathOptions => ({ color: '#ef4444', weight: 3, opacity: 0.9, fillOpacity: 0.25 }),
+        style: (): L.PathOptions => ({ color: '#ef4444', weight: 3, opacity: 0.9, fillOpacity: 0.25 } ),
       })
       layer.on('click', async () => {
         store.setSelectedFloodLoading(true)
-        const dEpoch = detailEpoch // NEW
+        const dEpoch = detailEpoch
         try {
           store.selectFlood(picked.id)
           const detail = await getFloodEventById(Number(picked.id))
-          if (dEpoch !== detailEpoch) return // NEW: switched away
+          if (dEpoch !== detailEpoch) return
           store.setSelectedFlood(detail)
           store.setActiveTab('flood')
           renderRoadSegmentFromDetail(detail[0])
@@ -242,11 +242,11 @@ async function renderFloodEvents(epoch: number) {
     }).bindTooltip(`<strong>${picked.name}</strong>`, { sticky: true })
     marker.on('click', async () => {
       store.setSelectedFloodLoading(true)
-      const dEpoch = detailEpoch // NEW
+      const dEpoch = detailEpoch
       try {
         store.selectFlood(picked.id)
         const detail = await getFloodEventById(Number(picked.id))
-        if (dEpoch !== detailEpoch) return // NEW
+        if (dEpoch !== detailEpoch) return
         store.setSelectedFlood(detail)
         store.setActiveTab('flood')
         renderRoadSegmentFromDetail(detail)
@@ -264,14 +264,12 @@ async function renderFloodEvents(epoch: number) {
 async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
-  ++detailEpoch // NEW: cancel any in-flight flood-detail operations
+  ++detailEpoch
 
-  // Always clear everything first
   clearAllRouteOverlays()
   clearStopsOverlays()
   clearFloodOverlays()
 
-  // Exclusivity: only one family active
   if (store.layers.stops) {
     store.layers.floodEvents = false
     await renderStops(epoch)
@@ -281,8 +279,65 @@ async function renderLayers() {
   }
 }
 
+/* =================== Layer toggle Leaflet control =================== */
+let uiCheckboxStops: HTMLInputElement | null = null
+
+function addLayerToggleControl() {
+  const C = L.Control.extend({
+    onAdd: () => {
+      const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control')
+      div.style.background = '#fff'
+      div.style.padding = '8px 10px'
+      div.style.boxShadow = '0 1px 4px rgba(0,0,0,.2)'
+      div.style.font = '12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial'
+
+      const label = document.createElement('label')
+      label.style.display = 'flex'
+      label.style.alignItems = 'center'
+      label.style.gap = '6px'
+      label.style.cursor = 'pointer'
+
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = !!store.layers.stops
+      uiCheckboxStops = cb
+
+      const span = document.createElement('span')
+      span.textContent = 'Bus stops'
+
+      label.appendChild(cb)
+      label.appendChild(span)
+      div.appendChild(label)
+
+      // Prevent map drag when clicking the control
+      L.DomEvent.disableClickPropagation(div)
+
+      cb.addEventListener('change', () => {
+        const on = cb.checked
+        // Flip the store flag; the existing watchers below will re-render.
+        store.layers.stops = on
+        if (on) store.layers.floodEvents = false
+      })
+
+      return div
+    },
+    onRemove: () => {}
+  })
+  new C({ position: 'topleft' }).addTo(map)
+}
+
+// Keep the checkbox in sync if store.layers.stops changes elsewhere
+watch(() => store.layers.stops, (v) => {
+  if (uiCheckboxStops && uiCheckboxStops.checked !== v) {
+    uiCheckboxStops.checked = v
+  }
+})
+
 /* ========================= Reactivity glue ========================= */
-onMounted(renderLayers)
+onMounted(async () => {
+  renderLayers()
+  addLayerToggleControl()
+})
 
 // When either toggle changes, re-render (epoch cancels stale work)
 watch(() => ({ ...store.layers }), () => renderLayers(), { deep: true })
@@ -299,7 +354,7 @@ watch(() => store.activeTab, (tab) => {
   renderLayers()
 })
 
-/* ======= Other optional overlays (kept; not central to this bug) ======= */
+/* ======= Other optional overlays ======= */
 let originMarker: L.Layer | null = null
 let destMarker: L.Layer | null = null
 
@@ -347,7 +402,6 @@ watch(() => (store as any)._fitBoundsCoords, (coords) => {
     const b = L.latLngBounds(coords as any);
     if (b.isValid()) map.fitBounds(b.pad(0.12));
   } finally {
-    // reset so future clicks work again
     (store as any)._fitBoundsCoords = null;
   }
 }, { deep: false });
