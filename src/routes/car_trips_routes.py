@@ -3,7 +3,7 @@ from flasgger import swag_from
 from ..examples_for_doc.car_api_examples import *
 from ..examples_for_doc.car_related_schemas import *
 from src.controllers.car_trips_controller import (
-    get_all_car_trips_by_id,
+    get_all_car_trips_by_id, get_onemap_car_route
 )
 
 car_trips_route = Blueprint('car_trips_route', __name__)
@@ -190,3 +190,7 @@ car_trips_route = Blueprint('car_trips_route', __name__)
 def all_trips_by_id():
  
   return get_all_car_trips_by_id()
+
+@car_trips_route.route('/onemap_car_route', methods=['GET'])
+def onemap_route():
+   return get_onemap_car_route()
