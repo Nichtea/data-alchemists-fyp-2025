@@ -250,6 +250,7 @@ function clearAllRouteOverlays() {
   if (driveRouteLayer) { map.removeLayer(driveRouteLayer); driveRouteLayer = null }
   clearColoredPolylines()
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
+  clearRouteEndpoints() // <-- also clear start/end markers
 }
 
 /* ---------------- WKT helpers ---------------- */
@@ -468,6 +469,53 @@ async function renderFloodEvents(epoch: number) {
   floodEventsLayer = group.addTo(map)
 }
 
+/* -------------------- Route endpoints (Big obvious markers) -------------------- */
+let routeStartMarker: L.Marker | null = null
+let routeEndMarker: L.Marker | null = null
+
+function createEndpointIcon(label: 'START' | 'END', variant: 'start' | 'end') {
+  const html = `
+    <div class="ep ${variant}">
+      <div class="pulse"></div>
+      <svg class="pin-svg" viewBox="0 0 52 72" aria-hidden="true">
+        <!-- outer pin -->
+        <path d="M26 0c-13.3 0-24 10.7-24 24 0 18 24 48 24 48s24-30 24-48C50 10.7 39.3 0 26 0z" />
+        <!-- inner circle -->
+        <circle cx="26" cy="24" r="10"></circle>
+      </svg>
+      <div class="badge">${label}</div>
+    </div>`
+  return L.divIcon({
+    className: 'ep-wrap',
+    html,
+    iconSize: [1, 1],
+    iconAnchor: [16, 44], // feels right for this SVG
+  })
+}
+
+const startIcon = createEndpointIcon('START', 'start')
+const endIcon   = createEndpointIcon('END', 'end')
+
+function clearRouteEndpoints() {
+  if (routeStartMarker) { routeStartMarker.remove(); routeStartMarker = null }
+  if (routeEndMarker)   { routeEndMarker.remove();   routeEndMarker = null }
+}
+
+/** Public-ish utility if you want to set endpoints manually from the store */
+function setRouteEndpoints(start: {lat:number, lon:number} | null, end: {lat:number, lon:number} | null) {
+  clearRouteEndpoints()
+  if (start && Number.isFinite(start.lat) && Number.isFinite(start.lon)) {
+    routeStartMarker = L.marker([start.lat, start.lon], {
+      icon: startIcon, zIndexOffset: 1000, riseOnHover: true
+    }).addTo(map).bindTooltip('Route start', { sticky: true })
+  }
+  if (end && Number.isFinite(end.lat) && Number.isFinite(end.lon)) {
+    routeEndMarker = L.marker([end.lat, end.lon], {
+      icon: endIcon, zIndexOffset: 1000, riseOnHover: true
+    }).addTo(map).bindTooltip('Route end', { sticky: true })
+  }
+}
+
 /* Central authoritative renderer */
 async function renderLayers() {
   ensureMap()
@@ -575,7 +623,9 @@ watch(() => store.highlightDest, (v) => {
 }, { deep: true })
 
 watch(() => store.busTripOverlay, (o) => {
+  // Keep your existing dashed overlay, but also show Start/End labels
   if (busRouteLayer) { map.removeLayer(busRouteLayer); busRouteLayer = null }
+  clearRouteEndpoints()
   if (!o) return
   const group = L.layerGroup()
   const start = L.circleMarker([o.start.lat, o.start.lon], { radius: 6, color:'#2563eb', weight:2, fillOpacity:0.9 }).bindTooltip('Trip start', { sticky: true })
@@ -589,6 +639,8 @@ watch(() => store.busTripOverlay, (o) => {
     group.addLayer(poly)
   }
   busRouteLayer = group.addTo(map)
+  // Labeled Start/End markers (big pins)
+  setRouteEndpoints({lat:o.start.lat, lon:o.start.lon}, {lat:o.end.lat, lon:o.end.lon})
 }, { deep: true })
 
 watch(() => (store as any)._fitBoundsCoords, (coords) => {
@@ -602,33 +654,54 @@ watch(() => (store as any)._fitBoundsCoords, (coords) => {
 }, { deep: false })
 
 watch(() => (store as any).serviceRouteOverlay, (o) => {
+  // Clear previous
+  if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
+  clearRouteEndpoints()
+
   if (!o) {
-    if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
     clearColoredPolylines()
     return
   }
+
+  // If polylines array provided (your colored segments path)
   if (Array.isArray(o?.polylines) && o.polylines.length) {
     setColoredPolylines(o.polylines)
-    if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
+    // Try to infer endpoints from first & last segment if present
+    const first = o.polylines[0]?.path?.[0]
+    const lastSeg = o.polylines[o.polylines.length - 1]
+    const last = lastSeg?.path?.[lastSeg.path.length - 1]
+    if (first && last) setRouteEndpoints({lat:first[0], lon:first[1]}, {lat:last[0], lon:last[1]})
     return
   }
-  if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
+
+  // Otherwise, build from directions array
   const group = L.layerGroup()
   const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444']
+  let firstPoint: L.LatLng | null = null
+  let lastPoint: L.LatLng | null = null
+
   o.directions.forEach((d: any, idx: number) => {
     const color = colors[idx % colors.length]
     const latlngs = (d.roadPath ?? d.points).map((p: [number, number]) => L.latLng(p[0], p[1]))
+    if (!firstPoint && latlngs.length) firstPoint = latlngs[0]
+    if (latlngs.length) lastPoint = latlngs[latlngs.length - 1]
+
     if (Array.isArray(d.roadPath) && d.roadPath.length >= 2) {
       group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96 }))
     } else if (latlngs.length >= 2) {
       group.addLayer(L.polyline(latlngs, { color, weight: 4, opacity: 0.85, dashArray: '6,6' }))
     }
-    if (latlngs.length) {
-      group.addLayer(L.circleMarker(latlngs[0], { radius: 5, color: '#2563eb', weight: 2 }))
-      group.addLayer(L.circleMarker(latlngs[latlngs.length-1], { radius: 5, color: '#16a34a', weight: 2 }))
-    }
   })
+
   serviceRouteLayer = group.addTo(map)
+
+  // Place labeled Start/End if we found endpoints
+  if (firstPoint && lastPoint) {
+    setRouteEndpoints(
+      { lat: firstPoint.lat, lon: firstPoint.lng },
+      { lat: lastPoint.lat,  lon: lastPoint.lng  },
+    )
+  }
 }, { deep: true })
 </script>
 
@@ -636,7 +709,8 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
   <div ref="mapEl" class="w-full h-full"></div>
 </template>
 
-<!-- Global styles (not scoped) so Leaflet tooltips render correctly -->
+<!-- Global styles (not scoped) so Leaflet tooltips and endpoint icons render correctly -->
+<!-- Global styles (not scoped) so Leaflet tooltips and endpoint icons render correctly -->
 <style>
 .flood-tooltip {
   padding: 0 !important;
@@ -674,6 +748,66 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
   background: #f9fafb;
   color: #374151;
   font-weight: 600;
+}
+
+/* --------- Big, obvious START/END icons with pulse --------- */
+.ep-wrap { pointer-events: none; } /* container is inert; marker still handles events */
+.ep {
+  position: relative;
+  transform: translate(-16px, -44px); /* align the SVG tip to lat/lon */
+  filter: drop-shadow(0 6px 12px rgba(0,0,0,.25));
+  user-select: none;
+}
+
+.ep .pin-svg {
+  width: 32px;
+  height: 44px;
+  display: block;
+}
+
+/* base pin colors per variant */
+.ep.start .pin-svg path { fill: #2563eb; }   /* blue shell */
+.ep.start .pin-svg circle { fill: #dbeafe; } /* blue inner */
+
+.ep.end .pin-svg path { fill: #16a34a; }     /* green shell */
+.ep.end .pin-svg circle { fill: #dcfce7; }   /* green inner */
+
+/* label pill */
+.ep .badge {
+  margin-top: 4px;
+  padding: 4px 10px;
+  font: 12px/1.1 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
+  font-weight: 800;
+  letter-spacing: .5px;
+  border-radius: 999px;
+  border: 1px solid rgba(17,24,39,.12);
+  background: #fff;
+  color: #111827;
+  white-space: nowrap;
+  text-transform: uppercase;
+  display: inline-block;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+
+/* subtle pulsing halo */
+.ep .pulse {
+  position: absolute;
+  left: 8px; top: 8px; /* center on the pin’s inner circle */
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: .25;
+  animation: ep-pulse 1.8s ease-out infinite;
+  transform: scale(1);
+  filter: blur(2px);
+}
+.ep.start { color: #3b82f6; } /* sets .pulse color */
+.ep.end   { color: #22c55e; }
+
+@keyframes ep-pulse {
+  0%   { opacity: .35; transform: scale(1); }
+  60%  { opacity: .10; transform: scale(2.3); }
+  100% { opacity: 0;    transform: scale(2.8); }
 }
 </style>
 
