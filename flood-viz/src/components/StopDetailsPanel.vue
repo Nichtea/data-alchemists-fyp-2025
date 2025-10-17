@@ -39,6 +39,35 @@ function viewDirectionOnMap(d: {
   (store as any).setActiveTab?.('stops');
 }
 
+function clearMapRoutes() {
+  try { currentRouteAbort?.abort() } catch {}
+  currentRouteAbort = null
+
+  ;(store as any).setServiceRouteOverlay?.(null)
+  ;(store as any).clearColoredPolylines?.()
+  ;(store as any).busTripOverlay = null
+  ;(store as any)._fitBoundsCoords = null
+
+  ;(store as any).setHighlightOrigin?.(null)
+  ;(store as any).setHighlightDest?.(null)
+  ;(store as any).highlightOrigin = null
+  ;(store as any).highlightDest = null
+  ;(store as any).highlightStop?.(null)
+
+  ;(store as any).setOrigin?.(null)
+  ;(store as any).setDestination?.(null)
+  ;(store as any).setOriginStopCode?.(null)
+  ;(store as any).setDestStopCode?.(null)
+
+  originText.value = ''
+  destText.value = ''
+
+  store.clearSelection?.()
+  arrivals.value = null
+  arrivalsLoading.value = false
+  arrivalsError.value = null
+}
+
 async function buildServiceIndex(): Promise<ServiceDirStops> {
   if (SERVICE_INDEX_PROMISE) return SERVICE_INDEX_PROMISE
   SERVICE_INDEX_PROMISE = (async () => {
@@ -791,21 +820,35 @@ onMounted(async () => {
         </div>
       </label>
 
-      <div class="flex items-center gap-2">
-        <button class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
-                @click="queryBestBusRoute" title="Find best bus route between selected stops">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/></svg>
-          Find best bus route
-        </button>
+      <div class="flex items-center gap-2 flex-wrap">
+          <button class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
+                  @click="queryBestBusRoute" title="Find best bus route between selected stops">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
+            </svg>
+            Find best bus route
+          </button>
 
-        <button class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
-                @click="queryPtRouteViaOneMap" :disabled="ptLoading" title="Public transport via OneMap (type addresses above)">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
-          {{ ptLoading ? 'Routing…' : 'Find best bus itinerary' }}
-        </button>
+          <button class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
+                  @click="queryPtRouteViaOneMap" :disabled="ptLoading" title="Public transport via OneMap (type addresses above)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+            </svg>
+            {{ ptLoading ? 'Routing…' : 'Find best bus itinerary' }}
+          </button>
 
-        <span v-if="ptError" class="text-xs text-rose-600">{{ ptError }}</span>
-      </div>
+          <!-- 🧹 New button here -->
+          <button class="inline-flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  @click="clearMapRoutes" title="Clear all drawn routes and map markers">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Clear Map & Routes
+          </button>
+
+          <span v-if="ptError" class="text-xs text-rose-600">{{ ptError }}</span>
+        </div>
+
     </div>
 
     <!-- ====== Itinerary list ====== -->
