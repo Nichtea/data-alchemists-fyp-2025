@@ -13,6 +13,7 @@ import type {
 // ---------- configurable base & paths ----------
 const API_BASE: string = "/api"
 
+//PATHS
 const PATHS = {
   // traffic & analytics (custom analytics endpoints; keep if your backend supports them)
   delay: '/traffic/delay',                 // GET ?mode=&scenario=&agg=&limit=
@@ -20,6 +21,8 @@ const PATHS = {
   criticality: '/traffic/criticality',     // GET ?metric=
   busImpacts: '/bus/impacts',              // GET ?scenario=
   summary: '/traffic/summary',             // GET ?mode=&scenario=
+  onemapRoute: '/onemap/route',            // GET ?start_address=&end_address=&date=&time=
+  getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
 
   // bus data (your existing Flask routes)
   busStops: '/bus_stops',                                      // GET
@@ -88,6 +91,35 @@ async function getJSON<T>(path: string, params?: Record<string, any>): Promise<T
   return (await r.json()) as T
 }
 
+// ---------- types for OneMap public transport route ----------
+
+export type OneMapPtLeg = {
+  mode: string
+  duration?: number
+  distance?: number
+  from?: { name?: string; stopCode?: string; lat?: number; lon?: number }
+  to?:   { name?: string; stopCode?: string; lat?: number; lon?: number }
+  // Augmented by backend
+  non_flooded_bus_duration?: number
+  flooded_bus_duration_5kmh?: number
+  flooded_bus_duration_12kmh?: number
+  flooded_bus_duration_30kmh?: number
+  flooded_bus_duration_48kmh?: number
+}
+
+export type OneMapPtItinerary = {
+  duration?: number
+  walkTime?: number
+  transitTime?: number
+  waitingTime?: number
+  legs?: OneMapPtLeg[]
+}
+
+export type OneMapPtResponse = {
+  plan?: { itineraries?: OneMapPtItinerary[] }
+  error?: string
+}
+
 // ---------- traffic & analytics ----------
 export async function getDelay(
   mode: Mode,
@@ -108,6 +140,17 @@ export async function getDelay(
     return { data }
   }
 }
+
+// 3) Add this fetcher near your other exports
+export async function getOneMapPtRoute(params: {
+  start_address: string
+  end_address: string
+  date?: string
+  time?: string
+}) {
+  return await getJSON<any>(PATHS.getRoute, params)
+}
+
 
 export async function getFloodedRoads(scenario: Scenario) {
   try {

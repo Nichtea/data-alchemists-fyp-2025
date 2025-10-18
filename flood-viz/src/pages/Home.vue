@@ -1,13 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue'              // ⬅ add this
 import { useAppStore } from '@/store/app'
 import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
 import FloodDetailsPanel from '@/components/FloodDetailsPanel.vue'
 import ControlsPanel from '@/components/ControlsPanel.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
+import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue' // ⬅ add this
 import { useUrlStateSync } from '@/components/useUrlStateSync'
 useUrlStateSync()
 
 const store = useAppStore()
+
+// Chart data = first direction of current serviceRouteOverlay (if it has floodSummary)
+const chartEntry = computed(() => {
+  const o: any = (store as any).serviceRouteOverlay
+  const d = o?.directions?.[0]
+  if (!d || !Number.isFinite(d.duration_s) || !d.floodSummary) return null
+  return { duration_s: Number(d.duration_s), floodSummary: d.floodSummary }
+})
 
 function activateStops() {
   store.setActiveTab('stops')
@@ -26,21 +36,21 @@ function activateFlood() {
     <div class="col-span-3 space-y-4">
       <div class="bg-white rounded shadow p-2">
         <div class="flex gap-2">
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">mobility</button>
+          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Mobility</button>
           <button
             class="px-3 py-1 rounded-full text-sm"
             :class="store.activeTab === 'stops' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
             @click="activateStops"
           >
-            stops
+            Stops
           </button>
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">routes</button>
+          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Routes</button>
           <button
             class="px-3 py-1 rounded-full text-sm"
             :class="store.activeTab === 'flood' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
             @click="activateFlood"
           >
-            flood
+            Flood
           </button>
         </div>
       </div>
@@ -52,11 +62,21 @@ function activateFlood() {
         <ControlsPanel />
       </div>
     </div>
-
     <div class="col-span-9">
-      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2">
-        <MapCanvas />
-      </div>
+      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2 flex flex-col"> <!-- ⬅ add flex -->
+    <!-- Chart above the map -->
+    <div v-if="chartEntry" class="mb-2">
+      <TravelTimeBarChart :entry="chartEntry" title="Travel time scenarios" />
     </div>
+
+    <!-- Map fills remaining space -->
+    <div class="flex-1 min-h-0">
+      <MapCanvas />
+    </div>
+  </div>
+</div>
+
+
+  
   </div>
 </template>
