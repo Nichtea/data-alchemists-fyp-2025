@@ -38,11 +38,9 @@ def get_flood_event_by_id():
 
     result = []
     try:
-        df = pd.read_csv("flood_events_rows.csv")
-        G = ox.load_graphml("sg_bus_network.graphml")
 
         for flood_event_id in flood_event_ids:
-            flood_event_row = df[df['flood_id'] == flood_event_id]
+            flood_event_row = flood_events_df[flood_events_df['flood_id'] == flood_event_id]
             if flood_event_row.empty:
                 continue  
 
