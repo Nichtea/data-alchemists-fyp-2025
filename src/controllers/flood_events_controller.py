@@ -14,6 +14,7 @@ load_dotenv()
 
 ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 LTA_BUS_ARRIVAL_URL = "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
+ONE_MAP_NEAREST_BUS_STOPS = "https://www.onemap.gov.sg/api/public/nearbysvc/getNearestBusStops"
 LTA_API_KEY = os.getenv("LTA_API_KEY")
 flood_events_df = pd.read_csv("flood_events_rows.csv")
 graph_path = "sg_bus_network.graphml"  
@@ -125,7 +126,7 @@ def get_buses_affected_by_floods():
     if pd.isna(latitude) or pd.isna(longitude):
         return jsonify({"error": f"Missing coordinates for flood_id {flood_id}"}), 400
 
-    onemap_url = f"https://www.onemap.gov.sg/api/public/nearbysvc/getNearestBusStops?latitude={latitude}&longitude={longitude}&radius_in_meters=1000"
+    onemap_url = f"{ONE_MAP_NEAREST_BUS_STOPS}?latitude={latitude}&longitude={longitude}&radius_in_meters=1000"
     headers_onemap = {"Authorization": ONEMAP_API_KEY}
 
     try:
