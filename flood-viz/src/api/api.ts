@@ -18,6 +18,7 @@ const PATHS = {
   // traffic & analytics (custom analytics endpoints; keep if your backend supports them)
   delay: '/traffic/delay',                 // GET ?mode=&scenario=&agg=&limit=
   floodedRoads: '/flood_events/roads',     // GET ?scenario=
+  floodLocations: '/flood_events/location',  // GET -> list of location counts
   criticality: '/traffic/criticality',     // GET ?metric=
   busImpacts: '/bus/impacts',              // GET ?scenario=
   summary: '/traffic/summary',             // GET ?mode=&scenario=
@@ -79,6 +80,28 @@ function toURL(path: string, params?: Record<string, string | number | boolean |
     })
   }
   return url.toString()
+}
+
+// ---------- flood locations (counts) ----------
+function normalizeFloodLocationsResponse(raw: any): FloodLocationCount[] {
+  // Handles [{ "Place": 3 }, ...] OR [["Place", 3], ...] OR { data: [...] }
+  const src = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
+  const out: FloodLocationCount[] = []
+  for (const item of src) {
+    if (Array.isArray(item) && item.length === 2) {
+      const [loc, cnt] = item
+      out.push({ location: String(loc), count: Number(cnt) || 0 })
+    } else if (item && typeof item === 'object') {
+      const [loc, cnt] = Object.entries(item)[0] ?? []
+      if (typeof loc === 'string') out.push({ location: loc, count: Number(cnt) || 0 })
+    }
+  }
+  return out
+}
+
+export async function getFloodLocations(): Promise<FloodLocationCount[]> {
+  const raw = await getJSON<any>(PATHS.floodLocations)
+  return normalizeFloodLocationsResponse(raw)
 }
 
 
@@ -161,6 +184,12 @@ export async function getFloodedRoads(scenario: Scenario) {
     return { data }
   }
 }
+
+export type FloodLocationCount = {
+  location: string
+  count: number
+}
+
 
 export async function getCriticality(metric: 'betweenness' | 'closeness') {
   try {

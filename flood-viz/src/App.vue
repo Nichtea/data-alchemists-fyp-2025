@@ -8,6 +8,9 @@
       <nav class="text-sm flex gap-4">
         <RouterLink to="/">Home</RouterLink>
         <RouterLink to="/about">About</RouterLink>
+        <RouterLink to="/PublicTransport">Public Transport</RouterLink>
+        <RouterLink to="/PrivateTransport">Private Transport</RouterLink>
+        <RouterLink to="/Flood">Flood</RouterLink>
       </nav>
     </header>
     <RouterView />

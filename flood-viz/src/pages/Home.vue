@@ -1,82 +1,86 @@
+<!-- src/pages/LandingPage.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'              // ⬅ add this
-import { useAppStore } from '@/store/app'
-import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
-import FloodDetailsPanel from '@/components/FloodDetailsPanel.vue'
-import ControlsPanel from '@/components/ControlsPanel.vue'
-import MapCanvas from '@/components/MapCanvas.vue'
-import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue' // ⬅ add this
-import { useUrlStateSync } from '@/components/useUrlStateSync'
-useUrlStateSync()
+import { ref } from 'vue'
 
-const store = useAppStore()
+const dark = ref(false)
 
-// Chart data = first direction of current serviceRouteOverlay (if it has floodSummary)
-const chartEntry = computed(() => {
-  const o: any = (store as any).serviceRouteOverlay
-  const d = o?.directions?.[0]
-  if (!d || !Number.isFinite(d.duration_s) || !d.floodSummary) return null
-  return { duration_s: Number(d.duration_s), floodSummary: d.floodSummary }
-})
-
-function activateStops() {
-  store.setActiveTab('stops')
-  store.setLayerVisible('stops', true)
-  store.setLayerVisible('floodEvents', false)
-}
-function activateFlood() {
-  store.setActiveTab('flood')
-  store.setLayerVisible('stops', false)
-  store.setLayerVisible('floodEvents', true)
+function toggleDark() {
+  dark.value = !dark.value
+  document.documentElement.classList.toggle('dark', dark.value)
 }
 </script>
 
 <template>
-  <div class="h-full grid grid-cols-12 gap-4 p-4">
-    <div class="col-span-3 space-y-4">
-      <div class="bg-white rounded shadow p-2">
-        <div class="flex gap-2">
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Mobility</button>
-          <button
-            class="px-3 py-1 rounded-full text-sm"
-            :class="store.activeTab === 'stops' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
-            @click="activateStops"
-          >
-            Stops
-          </button>
-          <button class="px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-500 cursor-default">Routes</button>
-          <button
-            class="px-3 py-1 rounded-full text-sm"
-            :class="store.activeTab === 'flood' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
-            @click="activateFlood"
-          >
-            Flood
-          </button>
+  <div class="min-h-screen bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+    <!-- HERO -->
+    <section class="py-20 px-4 sm:px-6 lg:px-8 text-center max-w-4xl mx-auto">
+      <h1 class="text-4xl sm:text-5xl font-extrabold">
+        Smarter Routes, Safer Commutes
+      </h1>
+      <p class="mt-4 text-slate-600 dark:text-slate-300 text-lg">
+        Discover how flooding impacts Singapore’s transport network — visualize affected roads and bus routes in real time with our interactive platform.
+      </p>
+      <div class="mt-6 flex justify-center gap-4">
+        <a href="#video" class="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700">Watch Demo</a>
+        <a href="#features" class="px-6 py-3 border border-slate-300 dark:border-slate-600 rounded-lg font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">Learn More</a>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="py-16 bg-slate-50 dark:bg-slate-800/50">
+      <div class="max-w-6xl mx-auto px-4">
+        <h2 class="text-3xl font-extrabold text-center">Key Features</h2>
+        <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div class="p-6 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div class="text-3xl mb-2">🚌</div>
+            <h3 class="font-semibold text-lg mb-1">Bus Stop Visualization</h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm">
+              Plot all bus stops on an interactive Leaflet map with hover details and clickable routes.
+            </p>
+          </div>
+          <div class="p-6 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div class="text-3xl mb-2">🌧️</div>
+            <h3 class="font-semibold text-lg mb-1">Flood Event Layers</h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm">
+              Overlay flood polygons and points dynamically. Tooltip caching ensures instant details.
+            </p>
+          </div>
+          <div class="p-6 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div class="text-3xl mb-2">🗺️</div>
+            <h3 class="font-semibold text-lg mb-1">Route & Travel Delay Analysis</h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm">
+              Compare baseline vs flooded travel times across different road segments with custom styling.
+            </p>
+          </div>
         </div>
       </div>
+    </section>
 
-      <StopDetailsPanel v-if="store.activeTab === 'stops'" />
-      <FloodDetailsPanel v-else-if="store.activeTab === 'flood'" />
-
-      <div class="bg-white rounded shadow p-3">
-        <ControlsPanel />
+    <!-- VIDEO SECTION -->
+    <section id="video" class="py-16">
+      <div class="max-w-6xl mx-auto px-4 text-center">
+        <h2 class="text-3xl font-extrabold mb-6">Demo Video</h2>
+        <div class="relative aspect-[16/9] w-full max-w-4xl mx-auto rounded-xl overflow-hidden shadow-lg">
+          <!-- Replace the URL below with your own YouTube video link -->
+          <iframe
+            class="w-full h-full"
+            src="https://www.youtube.com/embed/CDWqFX6OvJc?si=F0alJ2AshklIZaVp"
+            title="TransitFlood Demo Video"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen>
+          </iframe>
+        </div>
       </div>
-    </div>
-    <div class="col-span-9">
-      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2 flex flex-col"> <!-- ⬅ add flex -->
-    <!-- Chart above the map -->
-    <div v-if="chartEntry" class="mb-2">
-      <TravelTimeBarChart :entry="chartEntry" title="Travel time scenarios" />
-    </div>
+    </section>
 
-    <!-- Map fills remaining space -->
-    <div class="flex-1 min-h-0">
-      <MapCanvas />
-    </div>
-  </div>
-</div>
-
-
-  
+    <!-- FOOTER -->
+    <footer class="py-8 border-t border-slate-200 dark:border-slate-700 text-center text-sm text-slate-500 dark:text-slate-400">
+      © {{ new Date().getFullYear() }} TransitFlood. Built with Vue + Tailwind CSS.
+    </footer>
   </div>
 </template>
+
+<style scoped>
+.aspect-\[16\/9\] { aspect-ratio: 16 / 9; }
+</style>

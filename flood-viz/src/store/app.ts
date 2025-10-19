@@ -9,7 +9,7 @@ export interface LayersState {
   flooded: boolean
   criticality: boolean
 }
-export type ActiveTab = 'mobility' | 'stops' | 'routes' | 'flood'
+export type ActiveTab = 'stops' | 'flood'
 
 type Coords = { lat:number; lon:number }
 type HighlightRole = 'origin' | 'dest'
