@@ -18,6 +18,7 @@ const PATHS = {
   // traffic & analytics (custom analytics endpoints; keep if your backend supports them)
   delay: '/traffic/delay',                 // GET ?mode=&scenario=&agg=&limit=
   floodedRoads: '/flood_events/roads',     // GET ?scenario=
+  floodEventsByDateRange: '/get_flood_events_by_date_range', // GET ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
   floodLocations: '/flood_events/location',  // GET -> list of location counts
   criticality: '/traffic/criticality',     // GET ?metric=
   busImpacts: '/bus/impacts',              // GET ?scenario=
@@ -104,6 +105,13 @@ export async function getFloodLocations(): Promise<FloodLocationCount[]> {
   return normalizeFloodLocationsResponse(raw)
 }
 
+export async function getFloodEventsByDateRange(params: {
+  start_date: string; // 'YYYY-MM-DD'
+  end_date: string;   // 'YYYY-MM-DD'
+}) {
+  // returns an array of events with geometry/metrics computed by backend
+  return await getJSON<any[]>(PATHS.floodEventsByDateRange, params)
+}
 
 async function getJSON<T>(path: string, params?: Record<string, any>): Promise<T> {
   const r = await fetch(toURL(path, params), { method: 'GET' })

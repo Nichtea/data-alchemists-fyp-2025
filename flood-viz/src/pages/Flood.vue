@@ -1,18 +1,94 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import * as L from 'leaflet'
-import { getAllFloodEvents, getFloodEventById, getFloodLocations } from '@/api/api'
+import {
+  getAllFloodEvents,
+  getFloodEventById,
+  getFloodLocations,
+  getFloodEventsByDateRange, // ⬅️ NEW
+} from '@/api/api'
 
 /* ===================== Map refs ===================== */
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
-let visibleLayer: L.LayerGroup | null = null        // markers for filtered locations
-let segmentLayer: L.LayerGroup | null = null        // drawn road/route geometries
+let visibleLayer: L.LayerGroup | null = null
+let segmentLayer: L.LayerGroup | null = null
+let drawEpoch = 0 // ensure only one route is drawn at a time
 
 /* ===================== Data ===================== */
-const eventsAll = ref<any[]>([])
+const eventsAll = ref<any[]>([]) // current dataset (either ALL or date-filtered)
 const floodLocations = ref<{ location: string; count: number }[]>([])
 const loadingLocations = ref(true)
+
+/* ===================== Date filter ===================== */
+const startDate = ref<string>('') // format: YYYY-MM-DD
+const endDate   = ref<string>('') // format: YYYY-MM-DD
+const filteringByDate = ref(false)
+
+function isValidDateStr(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s)
+}
+
+// recompute location->count from events (used when date filter is active)
+function buildLocationCounts(events: any[]): { location: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const e of events) {
+    const name = e.flooded_location || e.name || ''
+    if (!name) continue
+    counts.set(name, (counts.get(name) || 0) + 1)
+  }
+  return [...counts.entries()].map(([location, count]) => ({ location, count }))
+}
+
+async function applyDateFilter() {
+  if (!isValidDateStr(startDate.value) || !isValidDateStr(endDate.value)) {
+    alert('Please enter dates as YYYY-MM-DD.')
+    return
+  }
+  loadingLocations.value = true
+  filteringByDate.value = true
+  try {
+    const data = await getFloodEventsByDateRange({
+      start_date: startDate.value,
+      end_date: endDate.value,
+    })
+    // replace current dataset
+    eventsAll.value = Array.isArray(data) ? data : []
+    // rebuild left table counts from filtered events
+    floodLocations.value = buildLocationCounts(eventsAll.value)
+    // re-render markers for the current (filtered) left list
+    const set = new Set(filteredLocations.value.map(r => r.location))
+    renderMarkersFor(set)
+    // also clear any drawn routes (new dataset)
+    clearSegments()
+  } catch (e) {
+    console.error('Date filter fetch failed', e)
+    alert('Failed to fetch events for date range.')
+  } finally {
+    loadingLocations.value = false
+  }
+}
+
+async function clearDateFilter() {
+  startDate.value = ''
+  endDate.value = ''
+  filteringByDate.value = false
+  loadingLocations.value = true
+  try {
+    // restore default: use pre-aggregated locations + all events
+    const [events, locations] = await Promise.all([
+      getAllFloodEvents().catch(() => []),
+      getFloodLocations().catch(() => []),
+    ])
+    eventsAll.value = events
+    floodLocations.value = locations
+    const set = new Set(filteredLocations.value.map(r => r.location))
+    renderMarkersFor(set)
+    clearSegments()
+  } finally {
+    loadingLocations.value = false
+  }
+}
 
 /* ===================== Filters / Search ===================== */
 const q = ref('')
@@ -48,37 +124,23 @@ function resetFilters() {
 }
 
 /* ===================== Tooltip helpers ===================== */
-let openOwner: L.Layer | null = null
-/* ================= Tooltip helpers ================= */
 let openFloodTooltipOwner: L.Layer | null = null
-
 function openExclusiveTooltip(owner: L.Layer, html: string, latlng?: L.LatLng) {
-  // Close any currently open tooltip (if it's from another marker)
   if (openFloodTooltipOwner && openFloodTooltipOwner !== owner) {
     (openFloodTooltipOwner as any).closeTooltip?.()
   }
-
   openFloodTooltipOwner = owner
-
-  // Update tooltip content
   const tt = (owner as any).getTooltip?.()
   if (tt) tt.setContent(html)
-
-  // Open tooltip (with or without coordinates)
-  if (latlng) {
-    (owner as any).openTooltip?.(latlng)
-  } else {
-    (owner as any).openTooltip?.()
-  }
+  if (latlng) (owner as any).openTooltip?.(latlng)
+  else (owner as any).openTooltip?.()
 }
-
-
 function closeTooltipOwner(owner: L.Layer) {
-  if (openOwner === owner) openOwner = null
+  if (openFloodTooltipOwner === owner) openFloodTooltipOwner = null
   ;(owner as any).closeTooltip?.()
 }
 
-// cache details for fast hovers and drawing
+// cache details for hovers & drawing
 const detailCache = new Map<number, any>()
 const detailPromise = new Map<number, Promise<any>>()
 async function getDetailCached(id: number) {
@@ -95,7 +157,7 @@ async function getDetailCached(id: number) {
   return p
 }
 
-// tiny helpers to format tooltips
+// tooltip content
 const fmt = {
   min: (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '-',
   km:  (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '-',
@@ -120,7 +182,7 @@ function buildTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
     </div>`
 }
 
-/* ===================== Geometry helpers (WKT + GeoJSON) ===================== */
+/* ===================== Geometry helpers ===================== */
 function wktToLatLngs(wkt: string): [number, number][][] {
   const s = (wkt || '').trim()
   if (!s) return []
@@ -153,7 +215,6 @@ function clearSegments() {
 }
 
 function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatLngBounds) {
-  // 1) WKT in detail.geometry
   if (typeof detail?.geometry === 'string' && detail.geometry.trim()) {
     const groups = wktToLatLngs(detail.geometry)
     for (const latlngs of groups) {
@@ -163,8 +224,6 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
     }
     return
   }
-
-  // 2) GeoJSON in detail.geom
   if (detail?.geom && typeof detail.geom === 'object') {
     const gj = L.geoJSON(detail.geom as any, { style: () => style })
     ;(segmentLayer as L.LayerGroup).addLayer(gj)
@@ -184,7 +243,7 @@ function ensureMap() {
   }).addTo(map)
 }
 
-// index to help “zoom to location”
+// index to “zoom to location”
 const groupByLocation = new Map<string, L.LayerGroup>()
 
 function renderMarkersFor(locationsSet: Set<string>) {
@@ -230,31 +289,29 @@ function renderMarkersFor(locationsSet: Set<string>) {
   if (bounds.length) map.fitBounds(L.latLngBounds(bounds as any).pad(0.12))
 }
 
-/* Clicking a row → draw routes for that location + zoom */
+/* Clicking a row → draw routes for that location + zoom (only one at a time) */
 async function focusLocation(name: string) {
   if (!map) return
+  const myEpoch = ++drawEpoch
   clearSegments()
+  segmentLayer = L.layerGroup().addTo(map)
 
-  // find events for that location
   const evts = eventsAll.value.filter(e => (e.flooded_location || e.name || '') === name)
   if (!evts.length) return
 
-  segmentLayer = L.layerGroup().addTo(map)
   const bounds = L.latLngBounds([])
-
-  // fetch details (cached) and draw their geometry
   const style: L.PathOptions = { color: '#1d4ed8', weight: 6, opacity: 0.92, dashArray: '8,6' }
+
   for (const e of evts) {
+    if (myEpoch !== drawEpoch) return
     const id = e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id
     try {
       const detail = id != null ? await getDetailCached(Number(id)) : e
+      if (myEpoch !== drawEpoch) return
       drawDetailGeometry(detail, style, bounds)
-    } catch {
-      /* ignore individual failures */
-    }
+    } catch { /* ignore individual failures */ }
   }
 
-  // if we drew any segments, fit to them; otherwise fit to markers of that location
   if (bounds.isValid()) {
     map.fitBounds(bounds.pad(0.15))
   } else {
@@ -278,7 +335,7 @@ onMounted(async () => {
   ensureMap()
   const [events, locations] = await Promise.all([
     getAllFloodEvents().catch(() => []),
-    getFloodLocations().catch(() => [])
+    getFloodLocations().catch(() => []),
   ])
   eventsAll.value = events
   floodLocations.value = locations
@@ -296,7 +353,29 @@ onMounted(async () => {
     <aside class="col-span-3 space-y-4">
       <div class="bg-white rounded shadow p-2">
         <div class="text-sm font-semibold">Flood-Prone Locations</div>
-        <div class="text-xs text-gray-500">Showing top {{ topN }}</div>
+        <div class="text-xs text-gray-500">
+          <span v-if="!filteringByDate">Showing top {{ topN }}</span>
+          <span v-else>Date range: {{ startDate || '—' }} → {{ endDate || '—' }}</span>
+        </div>
+      </div>
+
+      <!-- Date filter -->
+      <div class="bg-white rounded shadow p-3 space-y-2">
+        <div class="grid grid-cols-2 gap-2 items-center">
+          <label class="text-xs text-gray-600">Start date</label>
+          <input v-model="startDate" type="date" class="px-2 py-1 border rounded text-sm" />
+          <label class="text-xs text-gray-600">End date</label>
+          <input v-model="endDate" type="date" class="px-2 py-1 border rounded text-sm" />
+        </div>
+        <div class="flex gap-2">
+          <button class="px-2 py-1 border rounded hover:bg-gray-50" @click="applyDateFilter">Apply</button>
+          <button class="px-2 py-1 border rounded hover:bg-gray-50" @click="clearDateFilter" :disabled="!filteringByDate">
+            Clear
+          </button>
+        </div>
+        <div class="text-xs text-gray-500" v-if="filteringByDate">
+          Filtering by server-side date range.
+        </div>
       </div>
 
       <!-- Filters -->
@@ -334,7 +413,7 @@ onMounted(async () => {
 
       <!-- Results table -->
       <div class="bg-white rounded shadow p-3">
-        <div v-if="loadingLocations" class="text-gray-500 text-sm">Loading locations…</div>
+        <div v-if="loadingLocations" class="text-gray-500 text-sm">Loading…</div>
         <div v-else-if="!floodLocations.length" class="text-gray-500 text-sm">No flood data available.</div>
         <div v-else class="overflow-x-auto">
           <table class="min-w-full text-sm border">
