@@ -25,6 +25,7 @@ const PATHS = {
   summary: '/traffic/summary',             // GET ?mode=&scenario=
   onemapRoute: '/onemap/route',            // GET ?start_address=&end_address=&date=&time=
   getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
+  getBusesAffected: '/get_buses_affected_by_floods', // GET ?flood_id=
 
   // bus data (your existing Flask routes)
   busStops: '/bus_stops',                                      // GET
@@ -111,6 +112,12 @@ export async function getFloodEventsByDateRange(params: {
 }) {
   // returns an array of events with geometry/metrics computed by backend
   return await getJSON<any[]>(PATHS.floodEventsByDateRange, params)
+}
+
+export async function getBusesAffectedByFloods(floodId: number) {
+  // Returns an array of services; shape depends on your backend
+  // e.g. [{ service_no: "190" }, { ServiceNo: "960E" }, ...]
+  return await getJSON<any[]>(PATHS.getBusesAffected, { flood_id: floodId })
 }
 
 async function getJSON<T>(path: string, params?: Record<string, any>): Promise<T> {
