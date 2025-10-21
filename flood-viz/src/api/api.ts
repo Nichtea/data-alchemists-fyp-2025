@@ -23,7 +23,7 @@ const PATHS = {
   criticality: '/traffic/criticality',     // GET ?metric=
   busImpacts: '/bus/impacts',              // GET ?scenario=
   summary: '/traffic/summary',             // GET ?mode=&scenario=
-  onemapRoute: '/onemap/route',            // GET ?start_address=&end_address=&date=&time=
+  onemapRoute: '/onemap_car_route',            // GET ?start_address=&end_address=&date=&time=
   getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
   getBusesAffected: '/get_buses_affected_by_floods', // GET ?flood_id=
 
@@ -241,6 +241,7 @@ export async function getAllBusStops() {
   return await getJSON<any[]>(PATHS.busStops)
 }
 
+
 export async function getBusStopByCode(stopCode: string) {
   return await getJSON<any>(PATHS.busStopByCode(stopCode))
 }
@@ -311,4 +312,14 @@ export async function getBusTripsDelay(
     trip_end_area_code: endAreaCode,
     ...(extra?.speed_kmh ? { speed_kmh: extra.speed_kmh } : {})
   })
+}
+
+
+export async function getOnemapCarRoute(params: {
+  start_address: string
+  end_address: string
+  date?: string
+  time?: string
+}) {
+  return await getJSON<any>(PATHS.onemapRoute, params)
 }
