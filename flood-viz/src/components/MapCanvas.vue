@@ -234,15 +234,24 @@ function wktToLatLngs(wkt: string): [number, number][][] {
     return arr.length ? [arr] : []
   }
 }
-function renderRoadSegmentFromDetail(detail: any) {
-  if (!detail || typeof detail.geometry !== 'string') return
+
+/* Draw flooded road segment(s) from detail.geometry; returns bounds if drawn */
+function renderRoadSegmentFromDetail(detail: any): L.LatLngBounds | null {
+  if (!detail || typeof detail.geometry !== 'string') return null
   const lineGroups = wktToLatLngs(detail.geometry)
-  if (!lineGroups.length) return
+  if (!lineGroups.length) return null
+
+  // clear previous
+  if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
+
   const group = L.layerGroup()
-  const baseStyle: L.PolylineOptions = { color: '#1d4ed8', weight: 8, opacity: 0.9, dashArray: '8,6' }
-  const roadName = detail.road_name ?? 'Road segment'
+  // 🔴 Flooded segments styled in red, bold line
+  const baseStyle: L.PolylineOptions = { color: '#dc2626', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }
+  const roadName = detail.road_name ?? 'Flooded road'
   const roadType = detail.road_type ?? '-'
   const lengthM  = Number(detail.length_m ?? 0)
+
+  const all: L.LatLng[] = []
   for (const latlngs of lineGroups) {
     const poly = L.polyline(latlngs, baseStyle)
     poly.bindTooltip(`${roadName}`, { sticky: true })
@@ -252,8 +261,27 @@ function renderRoadSegmentFromDetail(detail: any) {
       <div>Length: ${isFinite(lengthM) ? (lengthM/1000).toFixed(3) + ' km' : '-'}</div>
     `)
     group.addLayer(poly)
+    all.push(...latlngs.map(([la, lo]) => L.latLng(la, lo)))
   }
   roadSegmentLayer = group.addTo(map)
+
+  const b = all.length ? L.latLngBounds(all) : null
+  if (b && b.isValid()) return b
+  return null
+}
+
+/* Helper to fetch detail by id and draw flooded roads on click */
+let clickEpoch = 0
+async function drawFloodSegmentById(floodId: number) {
+  const myEpoch = ++clickEpoch
+  try {
+    const detail = await getFloodDetailCached(Number(floodId))
+    if (myEpoch !== clickEpoch) return
+    const bounds = renderRoadSegmentFromDetail(detail)
+    if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.12))
+  } catch {
+    // swallow; tooltip already shows failure if hover triggered
+  }
 }
 
 /* Pickers */
@@ -353,9 +381,12 @@ async function renderFloodEvents(epoch: number) {
         child.on('mouseout', () => closeTooltipOwner(child))
       })
 
-      // ✅ Emit flood id on click (parent will fetch affected bus services)
-      geo.on('click', () => {
-        if (picked.id) emit('flood-click', { floodId: Number(picked.id) })
+      // ✅ Emit flood id on click AND draw flooded roads
+      geo.on('click', async () => {
+        if (picked.id) {
+          emit('flood-click', { floodId: Number(picked.id) })
+          await drawFloodSegmentById(Number(picked.id))
+        }
       })
 
       group.addLayer(geo)
@@ -386,9 +417,12 @@ async function renderFloodEvents(epoch: number) {
     })
     marker.on('mouseout', () => closeTooltipOwner(marker))
 
-    // ✅ Emit flood id on click (parent will fetch affected bus services)
-    marker.on('click', () => {
-      if (picked.id) emit('flood-click', { floodId: Number(picked.id) })
+    // ✅ Emit flood id on click AND draw flooded roads
+    marker.on('click', async () => {
+      if (picked.id) {
+        emit('flood-click', { floodId: Number(picked.id) })
+        await drawFloodSegmentById(Number(picked.id))
+      }
     })
 
     group.addLayer(marker)

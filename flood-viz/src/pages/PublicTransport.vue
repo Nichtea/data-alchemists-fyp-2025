@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useAppStore } from '@/store/app'
 import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
 import ControlsPanel from '@/components/ControlsPanel.vue'
@@ -11,7 +11,7 @@ import { getBusesAffectedByFloods } from '@/api/api'
 useUrlStateSync()
 const store = useAppStore()
 
-/* ================= Chart (unchanged) ================= */
+/* ================= Chart ================= */
 const chartEntry = computed(() => {
   const o: any = (store as any).serviceRouteOverlay
   const d = o?.directions?.[0]
@@ -20,16 +20,30 @@ const chartEntry = computed(() => {
 })
 
 /* ================= Tabs ================= */
+function clearFloodUI() {
+  selectedFloodId.value = null
+  affectedServices.value = []
+  affectedError.value = null
+  loadingAffected.value = false
+}
+
 function activateStops() {
   store.setActiveTab('stops')
   store.setLayerVisible('stops', true)
   store.setLayerVisible('floodEvents', false)
+  clearFloodUI() // ← hide & reset flood UI/state
 }
+
 function activateFlood() {
   store.setActiveTab('flood')
   store.setLayerVisible('stops', false)
   store.setLayerVisible('floodEvents', true)
 }
+
+// Safety: if tab changes elsewhere, still clear flood UI
+watch(() => store.activeTab, (tab) => {
+  if (tab !== 'flood') clearFloodUI()
+})
 
 /* ================= Affected bus services ================= */
 const selectedFloodId = ref<number | null>(null)
@@ -49,6 +63,9 @@ function normalizeServiceName(row: any): string | null {
 }
 
 async function onFloodClick(payload: { floodId: number }) {
+  // Ignore flood clicks unless Flood tab is active
+  if (store.activeTab !== 'flood') return
+
   selectedFloodId.value = payload.floodId
   loadingAffected.value = true
   affectedError.value = null
@@ -67,11 +84,9 @@ async function onFloodClick(payload: { floodId: number }) {
   try {
     const res: any = await getBusesAffectedByFloods(payload.floodId)
 
-    // Handle API error response directly
     if (res && typeof res === 'object' && 'error' in res) {
       const msg = String((res as any).error ?? '')
       if (isParseNoneError(msg)) {
-        // Treat as no affected buses
         affectedServices.value = []
         return
       } else {
@@ -103,7 +118,6 @@ async function onFloodClick(payload: { floodId: number }) {
       names = []
     }
 
-    // unique + sorted
     affectedServices.value = [...new Set(names)].sort((a, b) =>
       String(a).localeCompare(String(b), undefined, { numeric: true })
     )
@@ -113,9 +127,7 @@ async function onFloodClick(payload: { floodId: number }) {
       e?.error ||
       (typeof e?.toString === 'function' ? e.toString() : '') ||
       ''
-
     if (isParseNoneError(msg)) {
-      // Treat this as “no affected bus services”
       affectedServices.value = []
     } else {
       affectedError.value = msg || 'Failed to load affected services.'
@@ -124,26 +136,29 @@ async function onFloodClick(payload: { floodId: number }) {
     loadingAffected.value = false
   }
 }
-
 </script>
 
 <template>
-  <div class="h-full grid grid-cols-12 gap-4 p-4">
+  <div class="h-full grid grid-cols-12 gap-4 p-6 bg-gray-50">
     <!-- LEFT -->
     <div class="col-span-3 space-y-4">
       <!-- Tabs -->
-      <div class="bg-white rounded shadow p-2">
+      <div class="bg-white rounded-2xl shadow-sm p-3 border border-gray-100">
         <div class="flex gap-2">
           <button
-            class="px-3 py-1 rounded-full text-sm"
-            :class="store.activeTab === 'stops' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
+            class="flex-1 py-2 rounded-lg font-medium transition-colors duration-200"
+            :class="store.activeTab === 'stops'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
             @click="activateStops"
           >
             Stops
           </button>
           <button
-            class="px-3 py-1 rounded-full text-sm"
-            :class="store.activeTab === 'flood' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'"
+            class="flex-1 py-2 rounded-lg font-medium transition-colors duration-200"
+            :class="store.activeTab === 'flood'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
             @click="activateFlood"
           >
             Flood
@@ -151,57 +166,61 @@ async function onFloodClick(payload: { floodId: number }) {
         </div>
       </div>
 
-      <!-- Stop details when in Stops tab -->
-      <StopDetailsPanel v-if="store.activeTab === 'stops'" />
+      <!-- Left card: Stops OR Flood (never both) -->
+      <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
+        <!-- Stops content -->
+        <StopDetailsPanel v-if="store.activeTab === 'stops'" />
 
-      <!-- Affected bus services when in Flood tab -->
-      <div v-else class="bg-white rounded shadow p-3">
-        <div class="text-sm font-semibold mb-2">Affected bus services</div>
-
-        <div v-if="!selectedFloodId" class="text-xs text-gray-500">
-          Click a flood marker on the map to load affected services (within 1 km).
-        </div>
-
+        <!-- Flood content -->
         <div v-else>
-          <div class="text-xs text-gray-500 mb-2">
-            Flood ID: <span class="font-medium">{{ selectedFloodId }}</span>
+          <h2 class="text-base font-semibold text-gray-800 mb-3">
+            Affected Bus Services
+          </h2>
+
+          <div v-if="!selectedFloodId" class="text-sm text-gray-500">
+            Click a flood marker on the map to load affected services (within 1 km).
           </div>
 
-          <div v-if="loadingAffected" class="text-sm text-gray-600">Loading…</div>
-          <div v-else-if="affectedError" class="text-sm text-red-600">{{ affectedError }}</div>
-          <div v-else-if="!affectedServices.length" class="text-sm text-gray-600">
-            No services found for this flood.
-          </div>
+          <div v-else>
+            <div class="text-sm text-gray-500 mb-2">
+              Flood ID: <span class="font-medium">{{ selectedFloodId }}</span>
+            </div>
 
-          <ul v-else class="space-y-1">
-            <li
-              v-for="svc in affectedServices"
-              :key="svc"
-              class="px-2 py-1 border rounded text-sm flex items-center justify-between"
-            >
-              <span class="font-medium">Service {{ svc }}</span>
-            </li>
-          </ul>
+            <div v-if="loadingAffected" class="text-sm text-gray-600">Loading…</div>
+            <div v-else-if="affectedError" class="text-sm text-red-600">{{ affectedError }}</div>
+            <div v-else-if="!affectedServices.length" class="text-sm text-gray-600">
+              No services found for this flood.
+            </div>
+
+            <ul v-else class="space-y-1 max-h-64 overflow-y-auto">
+              <li
+                v-for="svc in affectedServices"
+                :key="svc"
+                class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50"
+              >
+                <span class="font-semibold text-blue-700">Service {{ svc }}</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
       <!-- Controls -->
-      <div class="bg-white rounded shadow p-3">
+      <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
         <ControlsPanel />
       </div>
     </div>
 
     <!-- RIGHT: Chart + Map -->
     <div class="col-span-9">
-      <div class="bg-white rounded shadow h-[calc(100vh-2.5rem)] p-2 flex flex-col">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 h-[calc(100vh-3rem)] p-3 flex flex-col">
         <!-- Optional chart -->
-        <div v-if="chartEntry" class="mb-2">
-          <TravelTimeBarChart :entry="chartEntry" title="Travel time scenarios" />
+        <div v-if="chartEntry" class="mb-3">
+          <TravelTimeBarChart :entry="chartEntry" title="Travel Time Scenarios" />
         </div>
 
         <!-- Map fills remaining space -->
-        <div class="flex-1 min-h-0">
-          <!-- Listen for flood marker clicks -->
+        <div class="flex-1 min-h-0 overflow-hidden rounded-xl border border-gray-100">
           <MapCanvas @flood-click="onFloodClick" />
         </div>
       </div>
