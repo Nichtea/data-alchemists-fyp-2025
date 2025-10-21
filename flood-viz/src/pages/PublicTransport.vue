@@ -71,71 +71,53 @@ async function onFloodClick(payload: { floodId: number }) {
   affectedError.value = null
   affectedServices.value = []
 
-  const toStringList = (arr: any[]): string[] =>
-    arr
-      .map((x) => (typeof x === 'string' ? x : (x != null ? String(x) : '')))
-      .map((s) => s.trim())
-      .filter(Boolean)
-
-  const isParseNoneError = (msg: unknown) =>
-    typeof msg === 'string' &&
-    (/ParseException/i.test(msg) || /Unknown type:\s*'NONE'/i.test(msg))
-
   try {
     const res: any = await getBusesAffectedByFloods(payload.floodId)
 
-    if (res && typeof res === 'object' && 'error' in res) {
-      const msg = String((res as any).error ?? '')
-      if (isParseNoneError(msg)) {
-        affectedServices.value = []
-        return
-      } else {
-        affectedError.value = msg || 'Failed to load affected services.'
-        return
-      }
+    // Expecting: { results: [ { affected_bus_services: string[], candidate_stops: [...], flood_id: number } ] }
+    if (!res || typeof res !== 'object' || !Array.isArray(res.results)) {
+      throw new Error('Unexpected response shape (missing results).')
     }
 
-    let names: string[] = []
-
-    if (Array.isArray(res)) {
-      if (res.length === 0) {
-        names = []
-      } else if (typeof res[0] === 'string') {
-        names = toStringList(res)
-      } else {
-        const raw = (res as any[]).map((x) =>
-          typeof normalizeServiceName === 'function'
-            ? normalizeServiceName(x)
-            : x?.name ?? x?.service ?? x
-        )
-        names = toStringList(raw)
-      }
-    } else if (res && typeof res === 'object' && Array.isArray(res.affected_bus_services)) {
-      names = toStringList(res.affected_bus_services)
-    } else if (typeof res === 'string') {
-      names = toStringList(res.split(','))
-    } else {
-      names = []
+    const first = res.results[0]
+    if (!first || typeof first !== 'object') {
+      // No results → no affected services
+      affectedServices.value = []
+      return
     }
+
+    // Prefer backend flood_id if present
+    if (first.flood_id != null && !Number.isNaN(Number(first.flood_id))) {
+      selectedFloodId.value = Number(first.flood_id)
+    }
+
+    const list = Array.isArray(first.affected_bus_services)
+      ? first.affected_bus_services
+      : []
+
+    // normalize → unique → sort numeric-aware
+    const names = list
+      .map((s: any) => String(s).trim())
+      .filter(Boolean)
 
     affectedServices.value = [...new Set(names)].sort((a, b) =>
       String(a).localeCompare(String(b), undefined, { numeric: true })
     )
+
+    // If you later want candidate stops, you can read first.candidate_stops here.
+    // (Not stored to state since you said old shapes aren’t needed.)
   } catch (e: any) {
     const msg =
       e?.message ||
       e?.error ||
       (typeof e?.toString === 'function' ? e.toString() : '') ||
-      ''
-    if (isParseNoneError(msg)) {
-      affectedServices.value = []
-    } else {
-      affectedError.value = msg || 'Failed to load affected services.'
-    }
+      'Failed to load affected services.'
+    affectedError.value = msg
   } finally {
     loadingAffected.value = false
   }
 }
+
 </script>
 
 <template>
