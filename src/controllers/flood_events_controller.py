@@ -9,6 +9,10 @@ from datetime import datetime
 import requests
 from shapely import wkb
 from dotenv import load_dotenv
+import geopandas as gpd
+from shapely import wkt
+from shapely.geometry import LineString, Point
+
 
 load_dotenv()
 
@@ -19,6 +23,14 @@ LTA_API_KEY = os.getenv("LTA_API_KEY")
 flood_events_df = pd.read_csv("flood_events_rows.csv")
 graph_path = "sg_bus_network.graphml"  
 G = ox.load_graphml(graph_path)
+
+stops_path = "stops.txt"
+stops_df = pd.read_csv(stops_path)
+stops_gdf = gpd.GeoDataFrame(
+    stops_df,
+    geometry=gpd.points_from_xy(stops_df["stop_lon"], stops_df["stop_lat"]),
+    crs="EPSG:4326"
+).to_crs("EPSG:3414")
 
 def get_all_flood_events():
     response = supabase.table('flood_events').select('*').execute()
@@ -109,61 +121,76 @@ def get_buses_affected_by_floods():
     flood_id = request.args.get("flood_id")
 
     if not flood_id:
-        return jsonify({"error": "flood_id parameter is required"}), 400
-
+        return jsonify({'error': 'flood_id parameter is required'}), 400
+    
     try:
-        flood_id = int(flood_id)
+        flood_event_ids = [int(id.strip()) for id in flood_id.split(',')]
     except ValueError:
-        return jsonify({"error": "flood_id must be an integer"}), 400
-
-    row = flood_events_df[flood_events_df["flood_id"] == flood_id]
-    if row.empty:
-        return jsonify({"error": f"No record found for flood_id {flood_id}"}), 404
-
-    latitude = row.iloc[0]["latitude"]
-    longitude = row.iloc[0]["longitude"]
-
-    if pd.isna(latitude) or pd.isna(longitude):
-        return jsonify({"error": f"Missing coordinates for flood_id {flood_id}"}), 400
-
-    onemap_url = f"{ONE_MAP_NEAREST_BUS_STOPS}?latitude={latitude}&longitude={longitude}&radius_in_meters=1000"
-    headers_onemap = {"Authorization": ONEMAP_API_KEY}
+        return jsonify({'error': 'flood_id must be a comma-separated list of integers'}), 400
 
     try:
-        onemap_resp = requests.get(onemap_url, headers=headers_onemap)
-        onemap_resp.raise_for_status()
-        onemap_data = onemap_resp.json()
-        bus_stop_ids = [str(stop["id"]) for stop in onemap_data if "id" in stop]
+
+        for flood_event_id in flood_event_ids:
+            flood_event_row = flood_events_df[flood_events_df['flood_id'] == flood_event_id]
+            if flood_event_row.empty:
+                continue  
+
+            try:
+                geom_str = flood_event_row.iloc[0]['geom']
+                geom = wkb.loads(bytes.fromhex(geom_str)) 
+                flood_lat = geom.y
+                flood_lon = geom.x
+            except Exception as e:
+                return jsonify({'error': f"Could not parse geom for flood_id {flood_event_id}: {e}"}), 500
+
+            nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
+            u, v, key = nearest_edge[0]
+            edge_data = G.get_edge_data(u, v, key)
+            geometry = str(edge_data.get('geometry'))
+            distance_threshold_m = 20
+            flood_line = wkt.loads(geometry)
+            flood_gdf = gpd.GeoDataFrame(geometry=[flood_line], crs="EPSG:4326").to_crs("EPSG:3414")
+           
+            flood_buffer = flood_gdf.buffer(distance_threshold_m)
+            candidate_stops = stops_gdf[stops_gdf.geometry.within(flood_buffer.unary_union)]
+
+            stops_list = [
+                {
+                    "stop_code": row["stop_code"],
+                    "stop_name": row["stop_name"],
+                    "stop_lat": row["stop_lat"],
+                    "stop_lon": row["stop_lon"],
+                    "distance_m": round(flood_gdf.distance(row.geometry).min(), 2)
+                }
+                for _, row in candidate_stops.iterrows()
+            ]
+            affected_services = set() 
+            headers_lta = {"AccountKey": LTA_API_KEY, "accept": "application/json"}
+
+            for item in stops_list:
+                stop_id = item["stop_code"]
+                try:
+                    lta_resp = requests.get(f"{LTA_BUS_ARRIVAL_URL}?BusStopCode={stop_id}", headers=headers_lta)
+                    if lta_resp.status_code != 200:
+                        continue
+                    lta_data = lta_resp.json()
+
+                    services = lta_data.get("Services", [])
+                    for s in services:
+                        service_no = s.get("ServiceNo")
+                        if service_no:
+                            affected_services.add(service_no)
+                except Exception:
+                    continue 
+
+            return jsonify({
+                "flood_id": flood_id,
+                "affected_bus_services": sorted(list(affected_services))}), 200
+
+            
     except Exception as e:
-        return jsonify({"error": "Failed to fetch OneMap data", "details": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-    if not bus_stop_ids:
-        return jsonify({"flood_id": flood_id, "affected_bus_services": []}), 200
-
-    affected_services = set() 
-    headers_lta = {"AccountKey": LTA_API_KEY, "accept": "application/json"}
-
-    for stop_id in bus_stop_ids:
-        try:
-            lta_resp = requests.get(f"{LTA_BUS_ARRIVAL_URL}?BusStopCode={stop_id}", headers=headers_lta)
-            if lta_resp.status_code != 200:
-                continue
-            lta_data = lta_resp.json()
-
-            services = lta_data.get("Services", [])
-            for s in services:
-                service_no = s.get("ServiceNo")
-                if service_no:
-                    affected_services.add(service_no)
-        except Exception:
-            continue 
-
-    return jsonify({
-        "flood_id": flood_id,
-        "latitude": latitude,
-        "longitude": longitude,
-        "affected_bus_services": sorted(list(affected_services))
-    }), 200
 
 def get_flood_events_by_date_range():
     start_date = request.args.get('start_date')
