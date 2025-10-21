@@ -229,7 +229,7 @@ def get_buses_affected_by_floods():
             all_results.append({
                 "flood_id": flood_event_id,
                 "affected_bus_services": sorted(list(affected_services)),
-                "candidate_stops": stops_list  # optional for debugging or mapping
+                "candidate_stops": stops_list  
             })
 
         return jsonify({"results": all_results}), 200
