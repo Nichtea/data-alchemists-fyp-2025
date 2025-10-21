@@ -54,29 +54,72 @@ async function onFloodClick(payload: { floodId: number }) {
   affectedError.value = null
   affectedServices.value = []
 
+  const toStringList = (arr: any[]): string[] =>
+    arr
+      .map((x) => (typeof x === 'string' ? x : (x != null ? String(x) : '')))
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+  const isParseNoneError = (msg: unknown) =>
+    typeof msg === 'string' &&
+    (/ParseException/i.test(msg) || /Unknown type:\s*'NONE'/i.test(msg))
+
   try {
     const res: any = await getBusesAffectedByFloods(payload.floodId)
+
+    // Handle API error response directly
+    if (res && typeof res === 'object' && 'error' in res) {
+      const msg = String((res as any).error ?? '')
+      if (isParseNoneError(msg)) {
+        // Treat as no affected buses
+        affectedServices.value = []
+        return
+      } else {
+        affectedError.value = msg || 'Failed to load affected services.'
+        return
+      }
+    }
 
     let names: string[] = []
 
     if (Array.isArray(res)) {
-      // API returned an array. It could be strings OR objects.
-      if (typeof res[0] === 'string') {
-        names = res as string[]
+      if (res.length === 0) {
+        names = []
+      } else if (typeof res[0] === 'string') {
+        names = toStringList(res)
       } else {
-        names = (res as any[]).map(normalizeServiceName).filter(Boolean) as string[]
+        const raw = (res as any[]).map((x) =>
+          typeof normalizeServiceName === 'function'
+            ? normalizeServiceName(x)
+            : x?.name ?? x?.service ?? x
+        )
+        names = toStringList(raw)
       }
-    } else if (res && Array.isArray(res.affected_bus_services)) {
-      // API returned an object with affected_bus_services
-      names = res.affected_bus_services as string[]
+    } else if (res && typeof res === 'object' && Array.isArray(res.affected_bus_services)) {
+      names = toStringList(res.affected_bus_services)
+    } else if (typeof res === 'string') {
+      names = toStringList(res.split(','))
+    } else {
+      names = []
     }
 
-    // unique + human sort
+    // unique + sorted
     affectedServices.value = [...new Set(names)].sort((a, b) =>
       String(a).localeCompare(String(b), undefined, { numeric: true })
     )
   } catch (e: any) {
-    affectedError.value = e?.message || 'Failed to load affected services.'
+    const msg =
+      e?.message ||
+      e?.error ||
+      (typeof e?.toString === 'function' ? e.toString() : '') ||
+      ''
+
+    if (isParseNoneError(msg)) {
+      // Treat this as “no affected bus services”
+      affectedServices.value = []
+    } else {
+      affectedError.value = msg || 'Failed to load affected services.'
+    }
   } finally {
     loadingAffected.value = false
   }
