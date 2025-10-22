@@ -93,40 +93,73 @@ def get_onemap_car_route():
     if not start_address or not end_address:
         return jsonify({"error": "start_address and end_address are required"}), 400
 
-    start_location = gmaps.geocode(start_address)
-    if not start_location:
-        return jsonify({"error": "Start address not found"}), 404
-    start_lat = start_location[0]['geometry']['location']['lat']
-    start_lon = start_location[0]['geometry']['location']['lng']
-
-    end_location = gmaps.geocode(end_address)
-    if not end_location:
-        return jsonify({"error": "End address not found"}), 404
-    end_lat = end_location[0]['geometry']['location']['lat']
-    end_lon = end_location[0]['geometry']['location']['lng']
-
-    print(f"Start: {start_lat}, {start_lon}; End: {end_lat}, {end_lon}")
-
-    if not (start_lat and start_lon and end_lat and end_lon):
-        return jsonify({
-            "error": "start_lat, start_lon, end_lat, and end_lon are required."
-        }), 400
-
     if not ONEMAP_API_KEY:
         return jsonify({"error": "OneMap API key missing. Please set ONEMAP_API_KEY environment variable."}), 500
 
-    params = {
-        "start": f"{start_lat},{start_lon}",
-        "end": f"{end_lat},{end_lon}",
-        "routeType": "drive"
-    }
-
-    headers = {"Authorization": ONEMAP_API_KEY}
-
     try:
-        response = requests.get(ONEMAP_BASE_URL, headers=headers, params=params, timeout=15)
-        data = response.json()  
+        # PARALLEL geocoding requests using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def geocode_address(address):
+            result = gmaps.geocode(address)
+            if not result:
+                return None
+            return {
+                'lat': result[0]['geometry']['location']['lat'],
+                'lon': result[0]['geometry']['location']['lng']
+            }
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_start = executor.submit(geocode_address, start_address)
+            future_end = executor.submit(geocode_address, end_address)
+            
+            start_coords = future_start.result()
+            end_coords = future_end.result()
+        
+        if not start_coords:
+            return jsonify({"error": "Start address not found"}), 404
+        if not end_coords:
+            return jsonify({"error": "End address not found"}), 404
+        
+        start_lat, start_lon = start_coords['lat'], start_coords['lon']
+        end_lat, end_lon = end_coords['lat'], end_coords['lon']
+        
+        print(f"Start: {start_lat}, {start_lon}; End: {end_lat}, {end_lon}")
 
+        # PARALLEL API calls - OneMap and Supabase simultaneously
+        tolerance = 0.0018  # 180m radius
+        
+        def fetch_onemap():
+            params = {
+                "start": f"{start_lat},{start_lon}",
+                "end": f"{end_lat},{end_lon}",
+                "routeType": "drive"
+            }
+            headers = {"Authorization": ONEMAP_API_KEY}
+            response = requests.get(ONEMAP_BASE_URL, headers=headers, params=params, timeout=15)
+            return response
+        
+        def fetch_supabase():
+            return supabase.table("car_trips").select("*") \
+                .gte("start_lat", start_lat - tolerance) \
+                .lte("start_lat", start_lat + tolerance) \
+                .gte("start_lon", start_lon - tolerance) \
+                .lte("start_lon", start_lon + tolerance) \
+                .gte("end_lat", end_lat - tolerance) \
+                .lte("end_lat", end_lat + tolerance) \
+                .gte("end_lon", end_lon - tolerance) \
+                .lte("end_lon", end_lon + tolerance) \
+                .execute()
+        
+        # Execute both API calls in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_onemap = executor.submit(fetch_onemap)
+            future_supabase = executor.submit(fetch_supabase)
+            
+            response = future_onemap.result()
+            supabase_response = future_supabase.result()
+        
+        # Process OneMap response
         if response.status_code != 200:
             return jsonify({
                 "error": "OneMap API request failed",
@@ -134,23 +167,14 @@ def get_onemap_car_route():
                 "details": response.text
             }), response.status_code
         
+        data = response.json()
         data['overall_route_status'] = "clear"
-
-        tolerance = 0.0018  # 180m radius, adjust as needed
-        supabase_response = supabase.table("car_trips").select("*") \
-            .gte("start_lat", start_lat - tolerance) \
-            .lte("start_lat", start_lat + tolerance) \
-            .gte("start_lon", start_lon - tolerance) \
-            .lte("start_lon", start_lon + tolerance) \
-            .gte("end_lat", end_lat - tolerance) \
-            .lte("end_lat", end_lat + tolerance) \
-            .gte("end_lon", end_lon - tolerance) \
-            .lte("end_lon", end_lon + tolerance) \
-            .execute()
-
+        
+        # Process Supabase response
         if supabase_response.data and len(supabase_response.data) > 0:
-            trip = supabase_response.data[0]  # take first match
-            time_travel_simulation = {
+            trip = supabase_response.data[0]
+            data['overall_route_status'] = "flooded"
+            data["time_travel_simulation"] = {
                 "81kph_total_duration": trip.get("81kph_total_duration"),
                 "72kph_total_duration": trip.get("72kph_total_duration"),
                 "45kph_total_duration": trip.get("45kph_total_duration"),
@@ -159,13 +183,10 @@ def get_onemap_car_route():
                 "5kph_total_duration": trip.get("5kph_total_duration"),
                 "90kph_total_duration": trip.get("90kph_total_duration"),
             }
-            data['overall_route_status'] = "flooded"
-            data["time_travel_simulation"] = time_travel_simulation
-
+        
         return jsonify(data), 200
 
     except requests.exceptions.Timeout:
         return jsonify({"error": "OneMap API request timed out"}), 504
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
