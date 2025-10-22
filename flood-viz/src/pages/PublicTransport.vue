@@ -134,7 +134,7 @@ async function onFloodClick(payload: { floodId: number }) {
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
             @click="activateStops"
           >
-            Stops
+            Bus Routes
           </button>
           <button
             class="flex-1 py-2 rounded-lg font-medium transition-colors duration-200"
