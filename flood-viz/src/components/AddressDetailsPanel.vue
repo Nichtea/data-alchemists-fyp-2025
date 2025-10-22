@@ -44,99 +44,72 @@ function swapAddresses() {
 </script>
 
 <template>
-  <!-- 与 Stops 面板统一：bg-white rounded shadow p-3 -->
-  <div class="bg-white rounded shadow p-3 border border-gray-100">
-    <div class="text-base font-semibold mb-2">Private Transport</div>
+  <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
+    <div class="flex items-center justify-between">
+      <div class="text-base font-semibold">Private Transport</div>
+      <div v-if="overallStatus" class="text-xs">
+        <span
+          :class="overallStatus === 'flooded' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'"
+          class="px-2 py-0.5 rounded-full font-medium"
+        >
+          {{ overallStatus }}
+        </span>
+      </div>
+    </div>
 
-    <div class="space-y-2">
-      <!-- Start address -->
+    <div class="mt-3 space-y-3">
+      <!-- Start -->
       <label class="block">
-        <div class="text-xs text-gray-600 mb-1">Starts At</div>
+        <div class="text-xs text-gray-600 mb-1 flex items-center gap-1">
+          <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] font-bold">A</span>
+          <span>Starts At</span>
+        </div>
         <input
           v-model="startModel"
           type="text"
           placeholder="Type an address (e.g. Woodlands Checkpoint)"
-          class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+          class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
           autocomplete="off"
         />
       </label>
 
-      <!-- End address -->
+      <!-- End -->
       <label class="block">
-        <div class="text-xs text-gray-600 mb-1">Ends At</div>
+        <div class="text-xs text-gray-600 mb-1 flex items-center gap-1">
+          <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-600 text-white text-[11px] font-bold">B</span>
+          <span>Ends At</span>
+        </div>
         <input
           v-model="endModel"
           type="text"
           placeholder="Type an address (e.g. Tampines East Community Club)"
-          class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+          class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
           autocomplete="off"
         />
       </label>
 
-      <!-- 可选：日期/时间（保持一致的输入尺寸与样式；需要时解注释） -->
-      <!--
-      <div class="grid grid-cols-2 gap-2">
-        <label class="block">
-          <div class="text-xs text-gray-600 mb-1">Date (optional)</div>
-          <input
-            v-model="dateModel"
-            type="date"
-            class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          />
-        </label>
-        <label class="block">
-          <div class="text-xs text-gray-600 mb-1">Time (optional)</div>
-          <input
-            v-model="timeModel"
-            type="time"
-            class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          />
-        </label>
-      </div>
-      -->
-
-      <!-- 操作区：与 Stops 面板按钮风格统一（px-3 py-1.5 / text-sm / inline-flex） -->
+      <!-- Actions -->
       <div class="flex items-center gap-2 flex-wrap pt-1">
         <button
-          class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
+          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-3 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
           :disabled="loading"
           @click="$emit('search')"
           title="Get route by car"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M3 13l2-2m0 0l7-7 4 4-7 7m-4-4v6a2 2 0 002 2h6"/>
-          </svg>
           {{ loading ? 'Loading…' : 'Get route' }}
         </button>
 
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
           @click="swapAddresses"
           title="Swap start/end"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M4 7h11M10 3l4 4-4 4M20 17H9m6 4-4-4 4-4"/>
-          </svg>
           Swap
         </button>
       </div>
 
-      <!-- 错误信息/总体状态：保持小号文字 -->
       <p v-if="errorMsg" class="text-xs text-rose-600 mt-1">{{ errorMsg }}</p>
-
-      <div v-if="overallStatus" class="text-xs mt-1">
-        Overall route status:
-        <span
-          :class="overallStatus === 'flooded'
-            ? 'text-rose-600 font-medium'
-            : 'text-blue-700 font-medium'"
-        >
-          {{ overallStatus }}
-        </span>
-      </div>
     </div>
   </div>
 </template>

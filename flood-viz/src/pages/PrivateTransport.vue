@@ -1,31 +1,33 @@
-<!-- File: src/pages/PrivateTransport.vue -->
+<!-- src/pages/PrivateTransport.vue -->
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import MapCanvasCar from '@/components/MapCanvasCar.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import AddressDetailsPanel from '@/components/AddressDetailsPanel.vue'
 import { getOnemapCarRoute } from '@/api/api'
+import mockRouteResp from '@/mocks/mock.json'
+const USE_MOCK = false
 
 // ======== UI State ========
-const startAddress = ref('Woodlands')
-const endAddress = ref('Tampines')
+const startAddress = ref('143 Victoria St, Singapore 188019')
+const endAddress = ref('961 Bukit Timah Rd, Singapore 588179')
 const date = ref<string>('') // optional: YYYY-MM-DD
 const time = ref<string>('') // optional: HH:mm
 
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
 
-
 const routeResp = ref<any | null>(null)
 
+const selectedIdx = ref<number>(0)
 
+// ======== helpers ========
 const overallStatus = computed<'clear' | 'flooded' | undefined>(
   () => routeResp.value?.overall_route_status
 )
 const simulation = computed<any | null>(
   () => routeResp.value?.time_travel_simulation || null
 )
-
 
 function decodePolyline(str: string): [number, number][] {
   let index = 0, lat = 0, lon = 0
@@ -44,16 +46,14 @@ function decodePolyline(str: string): [number, number][] {
   return out
 }
 
-
 function normalizeToPolylineList(route: any): [number, number][][] {
   if (!route) return []
 
-  
-  if (typeof route?.route_geometry === 'string') {
-    return [decodePolyline(route.route_geometry)]
-  }
+  // 1) encoded polyline in `route_geometry` / `encoded`
+  if (typeof route?.route_geometry === 'string') return [decodePolyline(route.route_geometry)]
+  if (typeof route?.encoded === 'string') return [decodePolyline(route.encoded)]
 
-  
+  // 2) direct list like [[lon,lat] or [lat,lon]]
   const direct = route.polyline || route.path || route.points
   if (Array.isArray(direct) && direct.length && Array.isArray(direct[0])) {
     const guess = direct[0]
@@ -65,7 +65,7 @@ function normalizeToPolylineList(route: any): [number, number][][] {
     return [mapped]
   }
 
-  
+  // 3) GeoJSON-like
   const gj = route.geometry || route.geojson || route.shape
   if (gj && gj.type && Array.isArray(gj.coordinates)) {
     if (gj.type === 'LineString') {
@@ -77,55 +77,90 @@ function normalizeToPolylineList(route: any): [number, number][][] {
     }
   }
 
-  
-  if (typeof route.encoded === 'string') {
-    return [decodePolyline(route.encoded)]
-  }
   return []
 }
 
 
-const routes = computed(() => {
-  const primary = routeResp.value?.phyroute || null
-  const alts = Array.isArray(routeResp.value?.alternativeroute)
-    ? routeResp.value.alternativeroute
-    : []
+function normalizeFloodedSegments(r: any): [number, number][][] | null {
+  
+  if (Array.isArray(r?.flooded_segments) && r.flooded_segments.length) {
+    
+    const segs: [number, number][][] = []
+    for (const seg of r.flooded_segments) {
+      if (Array.isArray(seg) && seg.length) {
+        const first = seg[0]
+        const looksLonLat = Array.isArray(first) && Math.abs(first[0]) > Math.abs(first[1])
+        const mapped = seg.map(([a, b]: any) => looksLonLat ? [b, a] : [a, b])
+        segs.push(mapped as [number, number][])
+      }
+    }
+    if (segs.length) return segs
+  }
+
+  
+  if (typeof r?.flooded_geometry === 'string') {
+    return [decodePolyline(r.flooded_geometry)]
+  }
+
+  return null
+}
+
+
+const allRoutesRaw = computed(() => {
+  if (!routeResp.value) return []
+
+  const main = routeResp.value
+  const phy = routeResp.value?.phyroute
+  const alts = Array.isArray(routeResp.value?.alternativeroute) ? routeResp.value.alternativeroute : []
 
   const list: any[] = []
-  if (primary && (primary.route_geometry || primary.geometry || primary.encoded)) {
-    list.push(primary)
+  if (main && (main.route_geometry || main.geometry || main.encoded)) {
+    list.push({ ...main, __label: main?.subtitle || 'Fastest route' })
   }
-  list.push(...alts)
+  if (phy && (phy.route_geometry || phy.geometry || phy.encoded)) {
+    list.push({ ...phy, __label: phy?.subtitle || 'Shortest distance' })
+  }
+  for (const a of alts) {
+    if (a && (a.route_geometry || a.geometry || a.encoded)) {
+      list.push({ ...a, __label: a?.subtitle || 'Alternative' })
+    }
+  }
+  return list
+})
 
-  return list.map((r: any, i: number) => {
+
+const routes = computed(() => {
+  const list = allRoutesRaw.value
+  if (!list.length) return []
+
+  const items = list.map((r: any, i: number) => {
     const lines = normalizeToPolylineList(r)
     const duration_s = Number(
       r?.summary?.duration_s ??
-      r?.route_summary?.total_time ?? 
+      r?.route_summary?.total_time ??
       r?.duration_s ?? r?.duration ?? r?.time_s ?? r?.time
     )
     const distance_m = Number(
       r?.summary?.distance_m ??
-      r?.route_summary?.total_distance ?? 
+      r?.route_summary?.total_distance ??
       r?.distance_m ?? r?.distance ?? r?.length_m
     )
 
-    const label =
-      r?.summary?.label ||
-      r?.subtitle || 
-      (i === 0 ? 'Primary' : `Alternative ${i}`)
-
     return {
       idx: i,
-      label,
+      label: r?.summary?.label || r?.__label || (i === 0 ? 'Primary' : `Alternative ${i}`),
       duration_s: Number.isFinite(duration_s) ? duration_s : undefined,
       distance_m: Number.isFinite(distance_m) ? distance_m : undefined,
       polylines: lines,
-      flooded_segments: r?.flooded_segments || null,
+      flooded_segments: normalizeFloodedSegments(r), 
     }
   })
-})
 
+  const sel = Math.min(Math.max(selectedIdx.value ?? 0, 0), items.length - 1)
+  
+  const [picked] = items.splice(sel, 1)
+  return [picked, ...items]
+})
 
 const endpoints = computed(() => {
   const r0 = routes.value?.[0]
@@ -139,8 +174,6 @@ const endpoints = computed(() => {
   }
 })
 
-
-// type Entry = { duration_s: number; floodSummary?: { baseline_s?: number; scenarios?: { scenario: string; duration_s: number }[] } }
 function minToSec(n: any): number | undefined {
   const v = Number(n); return Number.isFinite(v) ? Math.round(v * 60) : undefined
 }
@@ -154,7 +187,8 @@ const chartEntry = computed(() => {
 
   const clear_s =
     sec(sim.clear_duration_s ?? sim.clear_s) ??
-    minToSec(sim.t_clear_min ?? sim.clear_time_min)
+    minToSec(sim.t_clear_min ?? sim.clear_time_min) ??
+    sec(routeResp.value?.route_summary?.total_time)
 
   const flood_s_from_field =
     sec(sim.flood_duration_s ?? sim.flood_s) ??
@@ -178,7 +212,7 @@ const chartEntry = computed(() => {
   return {
     duration_s: primary_s,
     floodSummary: {
-      baseline_s: clear_s, // baseline 用晴天
+      baseline_s: clear_s,
       scenarios
     }
   }
@@ -187,26 +221,36 @@ const chartEntry = computed(() => {
 async function fetchRoute() {
   errorMsg.value = null
   routeResp.value = null
+  selectedIdx.value = 0
   if (!startAddress.value.trim() || !endAddress.value.trim()) {
     errorMsg.value = 'Please input start and end address.'
     return
   }
   loading.value = true
   try {
-    const res = await getOnemapCarRoute({
-      start_address: startAddress.value.trim(),
-      end_address: endAddress.value.trim(),
-      date: date.value || undefined,
-      time: time.value || undefined,
-    })
+    let res: any
+
+    if (USE_MOCK) {
+      res = mockRouteResp
+    } else {
+      res = await getOnemapCarRoute({
+        start_address: startAddress.value.trim(),
+        end_address: endAddress.value.trim(),
+        date: date.value || undefined,
+        time: time.value || undefined,
+      })
+    }
+
     if (!res || typeof res !== 'object') throw new Error('Empty response')
     routeResp.value = res
+    await nextTick()
   } catch (e: any) {
     errorMsg.value = e?.message || 'Failed to fetch route.'
   } finally {
     loading.value = false
   }
 }
+
 </script>
 
 <template>
@@ -230,63 +274,67 @@ async function fetchRoute() {
       </div>
 
       <!-- Route options -->
-      <div v-if="routes.length" class="bg-white rounded-2xl shadow-sm p-3 border border-gray-100">
-        <div class="text-sm font-semibold mb-2">Route options ({{ routes.length }})</div>
+      <div v-if="allRoutesRaw.length" class="bg-white rounded-2xl shadow-sm p-3 border border-gray-100">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm font-semibold">Route options ({{ allRoutesRaw.length }})</div>
+          <div v-if="overallStatus" class="text-xs">
+            <span
+              :class="overallStatus === 'flooded' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'"
+              class="px-2 py-0.5 rounded-full font-medium"
+            >
+              {{ overallStatus }}
+            </span>
+          </div>
+        </div>
 
         <div class="space-y-2">
-            <div v-for="(r, i) in routeResp?.alternativeroute ? [routeResp.phyroute, ...routeResp.alternativeroute] : [routeResp?.phyroute]"
-                :key="i"
-                class="rounded-xl border p-3 shadow-sm border-gray-200">
+          <div
+            v-for="(r, i) in allRoutesRaw"
+            :key="i"
+            class="rounded-xl border p-3 shadow-sm border-gray-200 hover:border-blue-300"
+            :class="i === selectedIdx ? 'ring-2 ring-blue-200' : ''"
+          >
             <div class="flex items-center gap-2 text-sm">
-                <div class="font-medium">Option {{ i + 1 }}</div>
-                <div class="text-gray-400">•</div>
-                <div class="text-gray-700">
+              <div class="font-medium">Option {{ i + 1 }}</div>
+              <div class="text-gray-400">•</div>
+              <div class="text-gray-700">
                 ~ {{ Math.round((r?.route_summary?.total_time ?? 0) / 60) }} min
-                </div>
-                <div class="text-gray-400">•</div>
-                <div class="text-gray-700">
+              </div>
+              <div class="text-gray-400">•</div>
+              <div class="text-gray-700">
                 {{ ((r?.route_summary?.total_distance ?? 0) / 1000).toFixed(2) }} km
-                </div>
-                <div class="ml-auto text-xs text-gray-500">
+              </div>
+              <div class="ml-auto text-xs text-gray-500">
                 {{ r?.subtitle || 'Route' }}
-                </div>
+              </div>
             </div>
 
             <div class="mt-1 text-xs text-gray-500">
-                via: {{ r?.viaRoute || (Array.isArray(r?.route_name) ? r.route_name.join(' → ') : '-') }}
+              via: {{ r?.viaRoute || (Array.isArray(r?.route_name) ? r.route_name.join(' → ') : '-') }}
             </div>
 
             <div class="mt-2 flex items-center gap-2">
-                <button
+              <button
                 class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-                @click="$nextTick(() => {
-                    
-                    routeResp = {
-                    ...routeResp,
-                    
-                    phyroute: r,
-                    alternativeroute: (routeResp?.alternativeroute || [])
-                        .filter((x: any) => x !== r)
-                    }
-                })"
-                >
+                @click="selectedIdx = i"
+                :disabled="selectedIdx === i"
+              >
                 Show on map
-                </button>
+              </button>
 
-                <details class="ml-auto">
+              <details class="ml-auto">
                 <summary class="cursor-pointer text-xs text-gray-500">Instructions</summary>
                 <ol class="mt-2 space-y-1 text-xs text-gray-700 list-decimal list-inside">
-                    <li v-for="(ins, idx2) in (r?.route_instructions || [])" :key="idx2">
+                  <li v-for="(ins, idx2) in (r?.route_instructions || [])" :key="idx2">
                     {{ ins?.[9] || `${ins?.[0]} ${ins?.[1] || ''}` }}
                     <span class="text-[11px] text-gray-400" v-if="ins?.[5]"> — {{ ins[5] }}</span>
-                    </li>
+                  </li>
                 </ol>
-                </details>
+              </details>
             </div>
-            </div>
+          </div>
         </div>
       </div>
-
     </div>
 
     <!-- RIGHT: Map -->
