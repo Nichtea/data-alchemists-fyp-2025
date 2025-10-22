@@ -101,19 +101,15 @@ def get_flood_event_by_id():
 
 def get_flood_events_by_location():
     try:
-        # Validate dataframe
         if flood_events_df.empty or 'flooded_location' not in flood_events_df.columns:
             return jsonify({"error": "No flood events found or missing 'flooded_location' column"}), 404
 
-        # Ensure flooded_location exists and is clean
         locations = flood_events_df['flooded_location'].dropna().tolist()
         locations = [loc for loc in locations if str(loc).strip() != '']
 
-        # Count how many times each location appears
         location_counts = Counter(locations)
         sorted_locations = sorted(location_counts.items(), key=lambda x: x[1], reverse=True)
 
-        # PRE-EXTRACT all coordinates first
         location_coords = {}
         for loc, _ in sorted_locations:
             matching_row = flood_events_df[flood_events_df['flooded_location'] == loc].iloc[0]
@@ -126,16 +122,13 @@ def get_flood_events_by_location():
                 except Exception as e:
                     print(f"Warning: could not parse geom for {loc}: {e}")
 
-        # BATCH process nearest edges - single call instead of N calls!
         if location_coords:
             lats = [coord[0] for coord in location_coords.values()]
             lons = [coord[1] for coord in location_coords.values()]
             locs_list = list(location_coords.keys())
             
-            # Single batched call - MUCH faster!
             nearest_edges = ox.distance.nearest_edges(G, X=lons, Y=lats)
             
-            # Build results
             result = []
             for i, loc in enumerate(locs_list):
                 count = location_counts[loc]
@@ -146,7 +139,6 @@ def get_flood_events_by_location():
                     edge_data = G.get_edge_data(u, v, key)
                     road_length_m = edge_data.get('length', 0)
 
-                    # Calculate travel times
                     speed_50_kmh = 50 * 1000 / 3600  # m/s
                     speed_20_kmh = 20 * 1000 / 3600  # m/s
 
@@ -323,34 +315,52 @@ def get_flood_events_by_date_range():
     if filtered_df.empty:
         return jsonify({"message": "No flood events found for the given date range"}), 200
 
-    result = filtered_df.to_dict(orient='records')
-    for item in result:
-        geom_str = item['geom']
-        geom = wkb.loads(bytes.fromhex(geom_str)) 
-        flood_lat = geom.y
-        flood_lon = geom.x
-        nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
-        u, v, key = nearest_edge[0]
-        edge_data = G.get_edge_data(u, v, key)
-
-        road_length_m = edge_data.get('length', 0)
-
-        speed_50_kmh = 50 * 1000 / 3600
-        speed_20_kmh = 20 * 1000 / 3600
-
-        time_50_kmh_sec = road_length_m / speed_50_kmh if speed_50_kmh > 0 else None
-        time_20_kmh_sec = road_length_m / speed_20_kmh if speed_20_kmh > 0 else None
-
-        time_50_kmh_min = round(time_50_kmh_sec / 60, 2) if time_50_kmh_sec else None
-        time_20_kmh_min = round(time_20_kmh_sec / 60, 2) if time_20_kmh_sec else None
-
-        item['road_name'] = edge_data.get('name', 'Unknown')
-        item['road_type'] = edge_data.get('highway', 'Unknown')
-        item['length_m'] = round(road_length_m, 2)
-        item['time_50kmh_min'] = time_50_kmh_min
-        item['time_20kmh_min'] = time_20_kmh_min
-        item['time_travel_delay_min'] = (time_20_kmh_min - time_50_kmh_min) if (time_50_kmh_min and time_20_kmh_min) else None
-        item['geometry'] = str(edge_data.get('geometry'))
+    lats = []
+    lons = []
+    valid_indices = []
+    
+    for idx, row in filtered_df.iterrows():
+        try:
+            geom = wkb.loads(bytes.fromhex(row['geom']))
+            lats.append(geom.y)
+            lons.append(geom.x)
+            valid_indices.append(idx)
+        except Exception as e:
+            print(f"Warning: could not parse geom at index {idx}: {e}")
+    
+    if valid_indices:
+        nearest_edges = ox.distance.nearest_edges(G, X=lons, Y=lats)
+        
+        speed_50_ms = 50 * 1000 / 3600 
+        speed_20_ms = 20 * 1000 / 3600  
+        
+        result = []
+        for i, idx in enumerate(valid_indices):
+            row = filtered_df.loc[idx]
+            item = row.to_dict()
+            
+            try:
+                u, v, key = nearest_edges[i]
+                edge_data = G.get_edge_data(u, v, key)
+                
+                road_length_m = edge_data.get('length', 0)
+                
+                time_50_kmh_min = round((road_length_m / speed_50_ms) / 60, 2)
+                time_20_kmh_min = round((road_length_m / speed_20_ms) / 60, 2)
+                
+                item['road_name'] = edge_data.get('name', 'Unknown')
+                item['road_type'] = edge_data.get('highway', 'Unknown')
+                item['length_m'] = round(road_length_m, 2)
+                item['time_50kmh_min'] = time_50_kmh_min
+                item['time_20kmh_min'] = time_20_kmh_min
+                item['time_travel_delay_min'] = round(time_20_kmh_min - time_50_kmh_min, 2)
+                item['geometry'] = str(edge_data.get('geometry'))
+                
+                result.append(item)
+            except Exception as e:
+                print(f"Warning: could not process edge at index {idx}: {e}")
+    else:
+        result = []
         
     return jsonify(result), 200
 
