@@ -10,7 +10,7 @@ import requests
 from shapely import wkb
 from dotenv import load_dotenv
 import geopandas as gpd
-from shapely import wkt
+from shapely import wkb
 from shapely.geometry import LineString, Point
 
 
@@ -101,16 +101,72 @@ def get_flood_event_by_id():
 
 def get_flood_events_by_location():
     try:
-        response = supabase.table('flood_events').select('flooded_location').execute()
-        
-        if not response.data:
-            return jsonify({"error": "No flood events found"}), 404
+        # Validate dataframe
+        if flood_events_df.empty or 'flooded_location' not in flood_events_df.columns:
+            return jsonify({"error": "No flood events found or missing 'flooded_location' column"}), 404
 
-        locations = [event['flooded_location'] for event in response.data if event.get('flooded_location')]
+        # Ensure flooded_location exists and is clean
+        locations = flood_events_df['flooded_location'].dropna().tolist()
+        locations = [loc for loc in locations if str(loc).strip() != '']
+
+        # Count how many times each location appears
         location_counts = Counter(locations)
         sorted_locations = sorted(location_counts.items(), key=lambda x: x[1], reverse=True)
 
-        result = [{loc: count} for loc, count in sorted_locations]
+        # PRE-EXTRACT all coordinates first
+        location_coords = {}
+        for loc, _ in sorted_locations:
+            matching_row = flood_events_df[flood_events_df['flooded_location'] == loc].iloc[0]
+            
+            if 'geom' in matching_row and pd.notna(matching_row['geom']):
+                try:
+                    geom_str = matching_row['geom']
+                    geom = wkb.loads(bytes.fromhex(geom_str))
+                    location_coords[loc] = (geom.y, geom.x)  # (lat, lon)
+                except Exception as e:
+                    print(f"Warning: could not parse geom for {loc}: {e}")
+
+        # BATCH process nearest edges - single call instead of N calls!
+        if location_coords:
+            lats = [coord[0] for coord in location_coords.values()]
+            lons = [coord[1] for coord in location_coords.values()]
+            locs_list = list(location_coords.keys())
+            
+            # Single batched call - MUCH faster!
+            nearest_edges = ox.distance.nearest_edges(G, X=lons, Y=lats)
+            
+            # Build results
+            result = []
+            for i, loc in enumerate(locs_list):
+                count = location_counts[loc]
+                lat, lon = location_coords[loc]
+                
+                try:
+                    u, v, key = nearest_edges[i]
+                    edge_data = G.get_edge_data(u, v, key)
+                    road_length_m = edge_data.get('length', 0)
+
+                    # Calculate travel times
+                    speed_50_kmh = 50 * 1000 / 3600  # m/s
+                    speed_20_kmh = 20 * 1000 / 3600  # m/s
+
+                    time_50_kmh_min = round((road_length_m / speed_50_kmh) / 60, 2)
+                    time_20_kmh_min = round((road_length_m / speed_20_kmh) / 60, 2)
+
+                    result.append({
+                        "location": loc,
+                        "count": count,
+                        "latitude": lat,
+                        "longitude": lon,
+                        "road_length": road_length_m,
+                        'time_50kmh_min': time_50_kmh_min,
+                        'time_20kmh_min': time_20_kmh_min,
+                        'time_travel_delay_min': round(time_20_kmh_min - time_50_kmh_min, 2)
+                    })
+                except Exception as e:
+                    print(f"Warning: could not process edge for {loc}: {e}")
+        else:
+            result = []
 
         return jsonify(result), 200
 
