@@ -11,7 +11,8 @@ from shapely import wkb
 from dotenv import load_dotenv
 import geopandas as gpd
 from shapely import wkb
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, mapping
+import pickle
 
 
 load_dotenv()
@@ -398,3 +399,60 @@ def get_flood_events_by_date_range():
         
     return jsonify(result), 200
 
+def get_critical_road_segments_near_flood():
+    try:
+        flood_id = request.args.get("flood_id")
+        buffer_m = float(request.args.get("buffer_m", 50))
+
+        if not flood_id:
+            return jsonify({"error": "Missing flood_id"}), 400
+
+        flood = flood_events_df[flood_events_df["flood_id"] == int(flood_id)]
+        if flood.empty:
+            return jsonify({"error": f"Flood {flood_id} not found"}), 404
+
+        flood_point = wkb.loads(bytes.fromhex(flood.iloc[0]["geom"]))
+
+        with open(f"Gcar_edge_closeness_centrality.pkl", "rb") as f:
+            centrality_data = pickle.load(f)
+
+        edges = ox.graph_to_gdfs(G, nodes=False).reset_index().to_crs(epsg=3414)
+        edges["centrality"] = edges.apply(
+            lambda r: centrality_data.get((r["u"], r["v"], r["key"]), 0), axis=1
+        )
+
+        flood_gdf = gpd.GeoDataFrame([{"geometry": flood_point}], crs="EPSG:4326").to_crs(epsg=3414)
+        flood_buffer = flood_gdf.buffer(buffer_m).iloc[0]
+
+        edges_sindex = edges.sindex
+        matches = edges.iloc[list(edges_sindex.intersection(flood_buffer.bounds))]
+        nearby_edges = matches[matches.intersects(flood_buffer)]
+
+        if nearby_edges.empty:
+            return jsonify({"message": "No critical roads near flood"}), 200
+
+        nearby_edges["norm_centrality"] = nearby_edges["centrality"] / nearby_edges["centrality"].max()
+        critical_subset = nearby_edges.sort_values(by="centrality", ascending=False).head(10)
+
+        results = [{
+            "road_name": row.get("name", "Unnamed Road"),
+            "road_type": row.get("highway", "Unknown"),
+            "length_m": round(row.get("length", 0), 2),
+            "centrality_score": round(row.get("centrality", 0), 6),
+            "geometry": mapping(row["geometry"])
+        } for _, row in critical_subset.iterrows()]
+
+        count_critical_segments = len(critical_subset)
+
+        return jsonify({
+            "flood_id": int(flood_id),
+            "buffer_m": buffer_m,
+            "flood_point": mapping(flood_point),
+            "count_critical_segments": count_critical_segments,
+            "critical_segments": results
+        }), 200
+
+    except FileNotFoundError:
+        return jsonify({"error": "Centrality file not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
