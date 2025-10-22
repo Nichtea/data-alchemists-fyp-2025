@@ -97,7 +97,6 @@ def get_onemap_car_route():
         return jsonify({"error": "OneMap API key missing. Please set ONEMAP_API_KEY environment variable."}), 500
 
     try:
-        # PARALLEL geocoding requests using ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor
         
         def geocode_address(address):
@@ -126,7 +125,6 @@ def get_onemap_car_route():
         
         print(f"Start: {start_lat}, {start_lon}; End: {end_lat}, {end_lon}")
 
-        # PARALLEL API calls - OneMap and Supabase simultaneously
         tolerance = 0.0018  # 180m radius
         
         def fetch_onemap():
@@ -151,7 +149,6 @@ def get_onemap_car_route():
                 .lte("end_lon", end_lon + tolerance) \
                 .execute()
         
-        # Execute both API calls in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_onemap = executor.submit(fetch_onemap)
             future_supabase = executor.submit(fetch_supabase)
@@ -159,7 +156,6 @@ def get_onemap_car_route():
             response = future_onemap.result()
             supabase_response = future_supabase.result()
         
-        # Process OneMap response
         if response.status_code != 200:
             return jsonify({
                 "error": "OneMap API request failed",
@@ -170,7 +166,6 @@ def get_onemap_car_route():
         data = response.json()
         data['overall_route_status'] = "clear"
         
-        # Process Supabase response
         if supabase_response.data and len(supabase_response.data) > 0:
             trip = supabase_response.data[0]
             data['overall_route_status'] = "flooded"
