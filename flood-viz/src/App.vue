@@ -44,11 +44,6 @@ const isActive = (path: string) => computed(() => route.path === path)
       <RouterView />
     </main>
 
-    <!-- Footer -->
-    <footer
-      class="h-12 border-t text-sm flex items-center justify-center text-gray-500 bg-white"
-    >
-      © {{ new Date().getFullYear() }} Flood-Viz. All rights reserved.
-    </footer>
+    
   </div>
 </template>
