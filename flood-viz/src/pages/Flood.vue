@@ -5,39 +5,52 @@ import {
   getAllFloodEvents,
   getFloodEventById,
   getFloodLocations,
-  getFloodEventsByDateRange, // ⬅️ NEW
+  getFloodEventsByDateRange,
 } from '@/api/api'
 
-/* ===================== Map refs ===================== */
+// ===== Types for sidebar rows =====
+type FloodRow = {
+  location: string
+  count: number
+  time_travel_delay_min?: number
+}
+
+// ===================== Map refs =====================
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
 let visibleLayer: L.LayerGroup | null = null
 let segmentLayer: L.LayerGroup | null = null
 let drawEpoch = 0 // ensure only one route is drawn at a time
 
-/* ===================== Data ===================== */
+// ===================== Data =====================
 const eventsAll = ref<any[]>([]) // current dataset (either ALL or date-filtered)
-const floodLocations = ref<{ location: string; count: number }[]>([])
+const floodLocations = ref<FloodRow[]>([])
 const loadingLocations = ref(true)
 
-/* ===================== Date filter ===================== */
-const startDate = ref<string>('') // format: YYYY-MM-DD
-const endDate   = ref<string>('') // format: YYYY-MM-DD
+// ===================== Date filter =====================
+const startDate = ref<string>('') // YYYY-MM-DD
+const endDate   = ref<string>('') // YYYY-MM-DD
 const filteringByDate = ref(false)
 
 function isValidDateStr(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s)
 }
 
-// recompute location->count from events (used when date filter is active)
-function buildLocationCounts(events: any[]): { location: string; count: number }[] {
-  const counts = new Map<string, number>()
+// recompute location-> {count, maxDelay} from events (used when date filter is active)
+function buildLocationCounts(events: any[]): FloodRow[] {
+  const byLoc = new Map<string, FloodRow>()
   for (const e of events) {
     const name = e.flooded_location || e.name || ''
     if (!name) continue
-    counts.set(name, (counts.get(name) || 0) + 1)
+    const cur = byLoc.get(name) || { location: name, count: 0, time_travel_delay_min: undefined }
+    cur.count += 1
+    const d = Number(e.time_travel_delay_min ?? e.delay_min ?? e.delay)
+    if (Number.isFinite(d)) {
+      cur.time_travel_delay_min = Math.max(cur.time_travel_delay_min ?? -Infinity, d)
+    }
+    byLoc.set(name, cur)
   }
-  return [...counts.entries()].map(([location, count]) => ({ location, count }))
+  return [...byLoc.values()]
 }
 
 async function applyDateFilter() {
@@ -52,14 +65,10 @@ async function applyDateFilter() {
       start_date: startDate.value,
       end_date: endDate.value,
     })
-    // replace current dataset
     eventsAll.value = Array.isArray(data) ? data : []
-    // rebuild left table counts from filtered events
     floodLocations.value = buildLocationCounts(eventsAll.value)
-    // re-render markers for the current (filtered) left list
     const set = new Set(filteredLocations.value.map(r => r.location))
     renderMarkersFor(set)
-    // also clear any drawn routes (new dataset)
     clearSegments()
   } catch (e) {
     console.error('Date filter fetch failed', e)
@@ -75,13 +84,12 @@ async function clearDateFilter() {
   filteringByDate.value = false
   loadingLocations.value = true
   try {
-    // restore default: use pre-aggregated locations + all events
     const [events, locations] = await Promise.all([
       getAllFloodEvents().catch(() => []),
-      getFloodLocations().catch(() => []),
+      getFloodLocations().catch(() => []), // already normalized to include optional delay if backend provides
     ])
     eventsAll.value = events
-    floodLocations.value = locations
+    floodLocations.value = Array.isArray(locations) ? (locations as any) : []
     const set = new Set(filteredLocations.value.map(r => r.location))
     renderMarkersFor(set)
     clearSegments()
@@ -90,10 +98,10 @@ async function clearDateFilter() {
   }
 }
 
-/* ===================== Filters / Search ===================== */
+// ===================== Filters / Search =====================
 const q = ref('')
 const minCount = ref(1)
-const sortBy = ref<'count' | 'name'>('count')
+const sortBy = ref<'count' | 'name' | 'delay'>('count')
 const sortDir = ref<'desc' | 'asc'>('desc')
 const topN = ref(20)
 
@@ -105,7 +113,14 @@ const filteredLocations = computed(() => {
   rows = rows.filter(r => (r.count ?? 0) >= (minCount.value || 0))
 
   rows = [...rows].sort((a, b) => {
-    if (sortBy.value === 'count') return sortDir.value === 'desc' ? b.count - a.count : a.count - b.count
+    if (sortBy.value === 'count') {
+      return sortDir.value === 'desc' ? b.count - a.count : a.count - b.count
+    }
+    if (sortBy.value === 'delay') {
+      const A = Number.isFinite(a.time_travel_delay_min as number) ? (a.time_travel_delay_min as number) : -Infinity
+      const B = Number.isFinite(b.time_travel_delay_min as number) ? (b.time_travel_delay_min as number) : -Infinity
+      return sortDir.value === 'desc' ? B - A : A - B
+    }
     const A = (a.location || '').toLowerCase()
     const B = (b.location || '').toLowerCase()
     return sortDir.value === 'desc' ? (B > A ? 1 : -1) : (A > B ? 1 : -1)
@@ -123,7 +138,7 @@ function resetFilters() {
   topN.value = 20
 }
 
-/* ===================== Tooltip helpers ===================== */
+// ===================== Tooltip helpers =====================
 let openFloodTooltipOwner: L.Layer | null = null
 function openExclusiveTooltip(owner: L.Layer, html: string, latlng?: L.LatLng) {
   if (openFloodTooltipOwner && openFloodTooltipOwner !== owner) {
@@ -157,15 +172,15 @@ async function getDetailCached(id: number) {
   return p
 }
 
-// tooltip content
+// tooltip formatting
 const fmt = {
-  min: (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '-',
-  km:  (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '-',
+  min: (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '—',
+  km:  (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '—',
 }
 function buildTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
-  const id = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '-'
+  const id = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '—'
   const loc = detail?.flooded_location ?? fallback?.name ?? 'Flood event'
-  const road = detail?.road_name ?? '-'
+  const road = detail?.road_name ?? '—'
   const lenM = detail?.length_m
   const delay = detail?.time_travel_delay_min ?? detail?.delay_min ?? detail?.delay
 
@@ -182,7 +197,7 @@ function buildTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
     </div>`
 }
 
-/* ===================== Geometry helpers ===================== */
+// ===================== Geometry helpers =====================
 function wktToLatLngs(wkt: string): [number, number][][] {
   const s = (wkt || '').trim()
   if (!s) return []
@@ -237,27 +252,20 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
 function ensureMap() {
   if (map) return
 
-  // Safety: warn if token is missing
+  // Optional: Mapbox tiles (works without token if you switch to OSM/other tiles)
   const token = import.meta.env.VITE_MAPBOX_TOKEN
-  if (!token) {
-    console.warn('VITE_MAPBOX_TOKEN is missing. Add it to your .env')
-  }
-
   map = L.map(mapEl.value as HTMLDivElement, {
     center: [1.3521, 103.8198],
     zoom: 12,
     zoomControl: true,
   })
 
-  // Use a Mapbox Studio style or a built-in one like 'mapbox/streets-v12'
   const styleId = 'mapbox/streets-v12'
-
-  // Use 512px tiles with zoomOffset -1 (Mapbox recommendation for Leaflet)
   L.tileLayer(
     'https://api.mapbox.com/styles/v1/{id}/tiles/512/{z}/{x}/{y}@2x?access_token={accessToken}',
     {
       id: styleId,
-      accessToken: token,
+      accessToken: token || '',
       tileSize: 512,
       zoomOffset: -1,
       maxZoom: 19,
@@ -268,10 +276,10 @@ function ensureMap() {
   ).addTo(map)
 }
 
-
 // index to “zoom to location”
 const groupByLocation = new Map<string, L.LayerGroup>()
 
+// ===== BLUE, MORE OBVIOUS MARKERS =====
 function renderMarkersFor(locationsSet: Set<string>) {
   if (!map) return
   if (visibleLayer) { map.removeLayer(visibleLayer); visibleLayer = null }
@@ -288,9 +296,20 @@ function renderMarkersFor(locationsSet: Set<string>) {
     const lon = e.longitude ?? e.lon ?? e.center_lon ?? e.lng
     if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) continue
 
+    // 💙 Brighter, more obvious blue marker
     const marker = L.circleMarker([+lat, +lon], {
-      radius: 6, color: '#ef4444', weight: 2, fillColor: '#fca5a5', fillOpacity: 0.9
-    }).bindTooltip('Loading…', { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' })
+      radius: 8,                 // bigger for visibility
+      color: '#1e40af',          // border: blue-800
+      weight: 3,
+      fillColor: '#3b82f6',      // fill: blue-500
+      fillOpacity: 0.9,
+      className: 'flood-marker', // for optional pulse/glow via CSS
+    }).bindTooltip('Loading…', {
+      sticky: true,
+      direction: 'top',
+      opacity: 0.95,
+      className: 'flood-tooltip',
+    })
 
     marker.on('mouseover', async (ev: L.LeafletMouseEvent) => {
       openExclusiveTooltip(marker, 'Loading…', ev.latlng)
@@ -335,7 +354,7 @@ async function focusLocation(name: string) {
       const detail = id != null ? await getDetailCached(Number(id)) : e
       if (myEpoch !== drawEpoch) return
       drawDetailGeometry(detail, style, bounds)
-    } catch { /* ignore individual failures */ }
+    } catch { /* ignore */ }
   }
 
   if (bounds.isValid()) {
@@ -350,13 +369,13 @@ async function focusLocation(name: string) {
   }
 }
 
-/* Re-render markers when left list changes */
+// Re-render markers when left list changes
 watch(filteredLocations, (rows) => {
   const set = new Set(rows.map(r => r.location))
   renderMarkersFor(set)
 })
 
-/* ===================== Lifecycle ===================== */
+// ===================== Lifecycle =====================
 onMounted(async () => {
   ensureMap()
   const [events, locations] = await Promise.all([
@@ -364,7 +383,12 @@ onMounted(async () => {
     getFloodLocations().catch(() => []),
   ])
   eventsAll.value = events
-  floodLocations.value = locations
+  // `getFloodLocations()` may already include delay/lat/lon; we keep only what we need for sidebar
+  floodLocations.value = (Array.isArray(locations) ? locations : []).map((r: any) => ({
+    location: String(r.location),
+    count: Number(r.count) || 0,
+    time_travel_delay_min: Number(r.time_travel_delay_min),
+  }))
   loadingLocations.value = false
 
   await nextTick()
@@ -421,6 +445,7 @@ onMounted(async () => {
             <select v-model="sortBy" class="px-2 py-1 border rounded text-sm">
               <option value="count">Count</option>
               <option value="name">Name</option>
+              <option value="delay">Delay</option>
             </select>
           </div>
           <div class="flex items-center gap-2">
@@ -447,6 +472,7 @@ onMounted(async () => {
               <tr>
                 <th class="px-2 py-1 text-left border">Location</th>
                 <th class="px-2 py-1 text-right border">Count</th>
+                <th class="px-2 py-1 text-right border">Time Travel Delay (min)</th>
               </tr>
             </thead>
             <tbody>
@@ -459,6 +485,12 @@ onMounted(async () => {
               >
                 <td class="px-2 py-1 border">{{ loc.location }}</td>
                 <td class="px-2 py-1 border text-right">{{ loc.count }}</td>
+                <td class="px-2 py-1 border text-right">
+                  {{ Number.isFinite(loc.time_travel_delay_min)
+                      ? (loc.time_travel_delay_min as number).toFixed(2)
+                      : '—'
+                  }}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -491,4 +523,14 @@ onMounted(async () => {
 .flood-tt .tt-table { width:100%; border-collapse:collapse; margin-top:4px; }
 .flood-tt .tt-table th, .flood-tt .tt-table td { border:1px solid #e5e7eb; padding:4px 6px; vertical-align:top; font-size:12px; }
 .flood-tt .tt-table th { width:48%; background:#f9fafb; color:#374151; font-weight:600; }
+
+/* Optional: subtle pulse/glow to make blue markers pop */
+.flood-marker path {
+  filter: drop-shadow(0 0 6px rgba(59,130,246,0.45));
+  animation: pulse-blue 2.1s ease-in-out infinite;
+}
+@keyframes pulse-blue {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.08); opacity: 0.8; }
+}
 </style>

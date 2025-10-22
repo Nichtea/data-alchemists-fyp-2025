@@ -85,20 +85,80 @@ function toURL(path: string, params?: Record<string, string | number | boolean |
 }
 
 // ---------- flood locations (counts) ----------
+// ---------- flood locations (counts) ----------
 function normalizeFloodLocationsResponse(raw: any): FloodLocationCount[] {
-  // Handles [{ "Place": 3 }, ...] OR [["Place", 3], ...] OR { data: [...] }
-  const src = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
-  const out: FloodLocationCount[] = []
+  // Accepts:
+  // 1) [{ location, count, latitude, longitude, time_travel_delay_min, ... }, ...]  ⬅️ NEW
+  // 2) [{ "Place": 3 }, ...]
+  // 3) [["Place", 3], ...]
+  // 4) { data: [...] } / { results: [...] }
+  const src =
+    Array.isArray(raw) ? raw
+    : Array.isArray(raw?.data) ? raw.data
+    : Array.isArray(raw?.results) ? raw.results
+    : []
+
+  // Group by location to handle duplicates (e.g., "Punggol West Flyover" appears twice)
+  const byLoc = new Map<string, FloodLocationCount>()
+
+  const upsert = (row: FloodLocationCount) => {
+    const key = (row.location || '').trim()
+    if (!key) return
+    const prev = byLoc.get(key)
+    if (!prev) {
+      byLoc.set(key, { ...row })
+      return
+    }
+    // merge rule: sum counts, take max delay, keep first lat/lon if missing
+    prev.count = (prev.count || 0) + (row.count || 0)
+    if (Number.isFinite(row.time_travel_delay_min)) {
+      const cur = Number(prev.time_travel_delay_min ?? -Infinity)
+      const nxt = Number(row.time_travel_delay_min)
+      prev.time_travel_delay_min = Math.max(cur, nxt)
+      if (!Number.isFinite(prev.time_travel_delay_min)) prev.time_travel_delay_min = nxt
+    }
+    if (!Number.isFinite(prev.latitude as number) && Number.isFinite(row.latitude as number)) prev.latitude = row.latitude
+    if (!Number.isFinite(prev.longitude as number) && Number.isFinite(row.longitude as number)) prev.longitude = row.longitude
+    // carry over other optional fields if useful
+    prev.road_length ??= row.road_length
+    prev.time_20kmh_min ??= row.time_20kmh_min
+    prev.time_50kmh_min ??= row.time_50kmh_min
+  }
+
   for (const item of src) {
-    if (Array.isArray(item) && item.length === 2) {
+    // Case 1: explicit fields from backend
+    if (item && typeof item === 'object' && 'location' in item && 'count' in item) {
+      upsert({
+        location: String(item.location),
+        count: Number(item.count) || 0,
+        time_travel_delay_min: Number(item.time_travel_delay_min),
+        latitude: Number(item.latitude),
+        longitude: Number(item.longitude),
+        road_length: Number(item.road_length),
+        time_20kmh_min: Number(item.time_20kmh_min),
+        time_50kmh_min: Number(item.time_50kmh_min),
+      })
+      continue
+    }
+
+    // Case 2: ["Place", 3]
+    if (Array.isArray(item) && item.length >= 2) {
       const [loc, cnt] = item
-      out.push({ location: String(loc), count: Number(cnt) || 0 })
-    } else if (item && typeof item === 'object') {
-      const [loc, cnt] = Object.entries(item)[0] ?? []
-      if (typeof loc === 'string') out.push({ location: loc, count: Number(cnt) || 0 })
+      upsert({ location: String(loc), count: Number(cnt) || 0 })
+      continue
+    }
+
+    // Case 3: { "Place": 3 }
+    if (item && typeof item === 'object') {
+      const entries = Object.entries(item)
+      if (entries.length === 1) {
+        const [loc, cnt] = entries[0]
+        if (typeof loc === 'string') upsert({ location: loc, count: Number(cnt) || 0 })
+      }
     }
   }
-  return out
+
+  return [...byLoc.values()]
 }
 
 export async function getFloodLocations(): Promise<FloodLocationCount[]> {
@@ -203,7 +263,15 @@ export async function getFloodedRoads(scenario: Scenario) {
 export type FloodLocationCount = {
   location: string
   count: number
+  // optional extras (when backend provides them)
+  time_travel_delay_min?: number
+  latitude?: number
+  longitude?: number
+  road_length?: number
+  time_20kmh_min?: number
+  time_50kmh_min?: number
 }
+
 
 
 export async function getCriticality(metric: 'betweenness' | 'closeness') {
