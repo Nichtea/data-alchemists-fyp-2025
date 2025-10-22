@@ -51,6 +51,7 @@ const affectedServices = ref<string[]>([])
 const loadingAffected = ref(false)
 const affectedError = ref<string | null>(null)
 
+// (helper kept in case you later need it; not used below)
 function normalizeServiceName(row: any): string | null {
   return (
     row?.service_no ??
@@ -75,11 +76,11 @@ async function onFloodClick(payload: { floodId: number }) {
     const res: any = await getBusesAffectedByFloods(payload.floodId)
 
     // Expecting: { results: [ { affected_bus_services: string[], candidate_stops: [...], flood_id: number } ] }
-    if (!res || typeof res !== 'object' || !Array.isArray(res.results)) {
+    if (!res || typeof res !== 'object' || !Array.isArray((res as any).results)) {
       throw new Error('Unexpected response shape (missing results).')
     }
 
-    const first = res.results[0]
+    const first: any = (res as any).results[0]
     if (!first || typeof first !== 'object') {
       // No results → no affected services
       affectedServices.value = []
@@ -91,18 +92,21 @@ async function onFloodClick(payload: { floodId: number }) {
       selectedFloodId.value = Number(first.flood_id)
     }
 
-    const list = Array.isArray(first.affected_bus_services)
+    // -------- TYPE-SAFE NORMALIZATION (fix) --------
+    const raw: unknown[] = Array.isArray(first.affected_bus_services)
       ? first.affected_bus_services
       : []
 
-    // normalize → unique → sort numeric-aware
-    const names = list
-      .map((s: any) => String(s).trim())
-      .filter(Boolean)
+    // map to strings, trim, and filter with a type guard so TS knows it's string[]
+    const names: string[] = raw
+      .map((s) => String(s ?? '').trim())
+      .filter((s): s is string => s.length > 0)
 
-    affectedServices.value = [...new Set(names)].sort((a, b) =>
-      String(a).localeCompare(String(b), undefined, { numeric: true })
+    // unique + numeric-aware sort → string[]
+    affectedServices.value = Array.from(new Set(names)).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true })
     )
+    // -----------------------------------------------
 
     // If you later want candidate stops, you can read first.candidate_stops here.
     // (Not stored to state since you said old shapes aren’t needed.)
@@ -117,7 +121,6 @@ async function onFloodClick(payload: { floodId: number }) {
     loadingAffected.value = false
   }
 }
-
 </script>
 
 <template>
