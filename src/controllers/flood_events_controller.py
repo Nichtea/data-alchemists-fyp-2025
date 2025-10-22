@@ -49,55 +49,77 @@ def get_flood_event_by_id():
     except ValueError:
         return jsonify({'error': 'flood_event_ids must be a comma-separated list of integers'}), 400
 
-    result = []
     try:
-
-        for flood_event_id in flood_event_ids:
-            flood_event_row = flood_events_df[flood_events_df['flood_id'] == flood_event_id]
-            if flood_event_row.empty:
-                continue  
-
+        valid_floods = flood_events_df[flood_events_df['flood_id'].isin(flood_event_ids)]
+        if valid_floods.empty:
+            return jsonify({'error': 'Flood event(s) not found'}), 404
+        
+        flood_data = []
+        for _, row in valid_floods.iterrows():
             try:
-                geom_str = flood_event_row.iloc[0]['geom']
-                geom = wkb.loads(bytes.fromhex(geom_str)) 
-                flood_lat = geom.y
-                flood_lon = geom.x
+                geom = wkb.loads(bytes.fromhex(row['geom']))
+                flood_data.append({
+                    'flood_id': row['flood_id'],
+                    'lat': geom.y,
+                    'lon': geom.x
+                })
             except Exception as e:
-                return jsonify({'error': f"Could not parse geom for flood_id {flood_event_id}: {e}"}), 500
+                return jsonify({'error': f"Could not parse geom for flood_id {row['flood_id']}: {e}"}), 500
 
-            nearest_edge = ox.distance.nearest_edges(G, X=[flood_lon], Y=[flood_lat])
-            u, v, key = nearest_edge[0]
-            edge_data = G.get_edge_data(u, v, key)
+        if not flood_data:
+            return jsonify({'error': 'Could not parse geometries'}), 500
 
-            road_length_m = edge_data.get('length', 0)
+        lats = [d['lat'] for d in flood_data]
+        lons = [d['lon'] for d in flood_data]
+        nearest_edges = ox.distance.nearest_edges(G, X=lons, Y=lats)
 
-            speed_50_kmh = 50 * 1000 / 3600
-            speed_20_kmh = 20 * 1000 / 3600
+        speed_50_ms = 50 * 1000 / 3600
+        speed_20_ms = 20 * 1000 / 3600
 
-            time_50_kmh_sec = road_length_m / speed_50_kmh if speed_50_kmh > 0 else None
-            time_20_kmh_sec = road_length_m / speed_20_kmh if speed_20_kmh > 0 else None
+        result = []
+        for i, data in enumerate(flood_data):
+            try:
+                u, v, key = nearest_edges[i]
+                edge_data = G.get_edge_data(u, v, key)
 
-            time_50_kmh_min = round(time_50_kmh_sec / 60, 2) if time_50_kmh_sec else None
-            time_20_kmh_min = round(time_20_kmh_sec / 60, 2) if time_20_kmh_sec else None
+                road_name = edge_data.get('name', 'Unknown')
+                road_type = edge_data.get('highway', 'Unknown')
+                road_length_m = edge_data.get('length', 0)
 
-            result.append({
-                'flood_id': flood_event_id,
-                'road_name': edge_data.get('name', 'Unknown'),
-                'road_type': edge_data.get('highway', 'Unknown'),
-                'length_m': round(road_length_m, 2),
-                'time_50kmh_min': time_50_kmh_min,
-                'time_20kmh_min': time_20_kmh_min,
-                'time_travel_delay_min': (time_20_kmh_min - time_50_kmh_min) if (time_50_kmh_min and time_20_kmh_min) else None,
-                'geometry': str(edge_data.get('geometry'))
-            })
+                time_50_kmh_min = round((road_length_m / speed_50_ms) / 60, 2)
+                time_20_kmh_min = round((road_length_m / speed_20_ms) / 60, 2)
+
+                geometry = edge_data.get('geometry')
+                if geometry is None:
+                    u_node = G.nodes[u]
+                    v_node = G.nodes[v]
+                    geometry = LineString([
+                        (u_node['x'], u_node['y']),
+                        (v_node['x'], v_node['y'])
+                    ])
+                    print(f"Reconstructed geometry for edge ({u}, {v}, {key}) on {road_name}")
+
+                result.append({
+                    'flood_id': data['flood_id'],
+                    'road_name': road_name,
+                    'road_type': road_type,
+                    'length_m': round(road_length_m, 2),
+                    'time_50kmh_min': time_50_kmh_min,
+                    'time_20kmh_min': time_20_kmh_min,
+                    'time_travel_delay_min': round(time_20_kmh_min - time_50_kmh_min, 2),
+                    'geometry': geometry.wkt 
+                })
+            except Exception as e:
+                print(f"Warning: could not process flood_id {data['flood_id']}: {e}")
+                continue
+
+        if not result:
+            return jsonify({'error': 'Could not process any flood events'}), 500
+
+        return jsonify(result), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-    if not result:
-        return jsonify({'error': 'Flood event(s) not found'}), 404
-
-    return jsonify(result), 200
 
 def get_flood_events_by_location():
     try:
@@ -176,110 +198,122 @@ def get_buses_affected_by_floods():
     except ValueError:
         return jsonify({'error': 'flood_id must be a comma-separated list of integers'}), 400
 
-    all_results = []  
+    all_results = []
 
     try:
-        for flood_event_id in flood_event_ids:
-            flood_event_row = flood_events_df[flood_events_df['flood_id'] == flood_event_id]
-            if flood_event_row.empty:
-                print(f"⚠️ No flood record for ID {flood_event_id}")
-                continue  
-
+        valid_floods = flood_events_df[flood_events_df['flood_id'].isin(flood_event_ids)]
+        
+        if valid_floods.empty:
+            return jsonify({"results": []}), 200
+        
+        flood_coords = []
+        flood_ids_valid = []
+        
+        for _, row in valid_floods.iterrows():
             try:
-                geom_str = flood_event_row.iloc[0]['geom']
-                geom = wkb.loads(bytes.fromhex(geom_str)) 
-                flood_lat = geom.y
-                flood_lon = geom.x
+                geom = wkb.loads(bytes.fromhex(row['geom']))
+                flood_coords.append((geom.y, geom.x))  # (lat, lon)
+                flood_ids_valid.append(row['flood_id'])
             except Exception as e:
-                return jsonify({'error': f"Could not parse geom for flood_id {flood_event_id}: {e}"}), 500
-
-            print(f"\nFlood ID {flood_event_id}: ({flood_lat}, {flood_lon})")
-            print("Graph CRS:", G.graph.get('crs'))
-
-            flood_point = gpd.GeoDataFrame(
-                geometry=[Point(flood_lon, flood_lat)],
-                crs="EPSG:4326"
-            )
-            if "crs" in G.graph and G.graph["crs"]:
-                flood_point = flood_point.to_crs(G.graph["crs"])
-            else:
-                print("Warning: Graph CRS not defined; assuming EPSG:4326")
-
-            flood_x = flood_point.geometry.x.iloc[0]
-            flood_y = flood_point.geometry.y.iloc[0]
-
+                print(f"Could not parse geom for flood_id {row['flood_id']}: {e}")
+        
+        if not flood_coords:
+            return jsonify({"results": []}), 200
+        
+        lats, lons = zip(*flood_coords)
+        flood_points = gpd.GeoDataFrame(
+            geometry=[Point(lon, lat) for lat, lon in flood_coords],
+            crs="EPSG:4326"
+        )
+        
+        if "crs" in G.graph and G.graph["crs"]:
+            flood_points = flood_points.to_crs(G.graph["crs"])
+        
+        flood_xs = flood_points.geometry.x.tolist()
+        flood_ys = flood_points.geometry.y.tolist()
+        
+        nearest_edges = ox.distance.nearest_edges(G, X=flood_xs, Y=flood_ys)
+        
+        distance_threshold_m = 20
+        
+        stops_gdf_3414 = stops_gdf.to_crs("EPSG:3414")
+        
+        headers_lta = {"AccountKey": LTA_API_KEY, "accept": "application/json"}
+        
+        for i, flood_event_id in enumerate(flood_ids_valid):
+            print(f"\nFlood ID {flood_event_id}: ({lats[i]}, {lons[i]})")
+            
             try:
-                nearest_edge = ox.distance.nearest_edges(G, X=[flood_x], Y=[flood_y])
-            except Exception as e:
-                print(f"Error finding nearest edge for flood_id {flood_event_id}: {e}")
-                continue
-
-            print("Nearest edge found:", nearest_edge)
-
-            u, v, key = nearest_edge[0]
-            edge_data = G.get_edge_data(u, v, key)
-            print(f"Edge data keys: {list(edge_data.keys()) if edge_data else 'None'}")
-
-            geom_obj = edge_data.get('geometry') if edge_data else None
-
-            if geom_obj is None or str(geom_obj).lower() == "none":
-                u_data = G.nodes[u]
-                v_data = G.nodes[v]
-                if "x" in u_data and "y" in u_data and "x" in v_data and "y" in v_data:
-                    flood_line = LineString([(u_data["x"], u_data["y"]), (v_data["x"], v_data["y"])])
-                    print(f"Edge {u}-{v} missing geometry; reconstructed from nodes.")
-                else:
-                    print(f"Edge {u}-{v} missing coordinates, skipping.")
-                    continue
-            else:
-                flood_line = geom_obj
-                print(f"Using real geometry for edge {u}-{v}")
-
-            distance_threshold_m = 20
-            flood_gdf = gpd.GeoDataFrame(geometry=[flood_line], crs="EPSG:4326").to_crs("EPSG:3414")
-            flood_buffer = flood_gdf.buffer(distance_threshold_m)
-
-            candidate_stops = stops_gdf[stops_gdf.geometry.within(flood_buffer.unary_union)]
-            print(f"Candidate stops near flood {flood_event_id}: {len(candidate_stops)}")
-
-            stops_list = [
-                {
-                    "stop_code": row["stop_code"],
-                    "stop_name": row["stop_name"],
-                    "stop_lat": row["stop_lat"],
-                    "stop_lon": row["stop_lon"],
-                    "distance_m": round(flood_gdf.distance(row.geometry).min(), 2)
-                }
-                for _, row in candidate_stops.iterrows()
-            ]
-
-            affected_services = set() 
-            headers_lta = {"AccountKey": LTA_API_KEY, "accept": "application/json"}
-
-            for item in stops_list:
-                stop_id = item["stop_code"]
-                try:
-                    lta_resp = requests.get(
-                        f"{LTA_BUS_ARRIVAL_URL}?BusStopCode={stop_id}",
-                        headers=headers_lta
-                    )
-                    if lta_resp.status_code != 200:
+                u, v, key = nearest_edges[i]
+                edge_data = G.get_edge_data(u, v, key)
+                
+                geom_obj = edge_data.get('geometry') if edge_data else None
+                
+                if geom_obj is None or str(geom_obj).lower() == "none":
+                    u_data = G.nodes[u]
+                    v_data = G.nodes[v]
+                    if "x" in u_data and "y" in u_data and "x" in v_data and "y" in v_data:
+                        flood_line = LineString([(u_data["x"], u_data["y"]), (v_data["x"], v_data["y"])])
+                        print(f"Edge {u}-{v} missing geometry; reconstructed from nodes.")
+                    else:
+                        print(f"Edge {u}-{v} missing coordinates, skipping.")
                         continue
-                    lta_data = lta_resp.json()
-                    for s in lta_data.get("Services", []):
-                        service_no = s.get("ServiceNo")
-                        if service_no:
-                            affected_services.add(service_no)
-                except Exception as e:
-                    print(f"Error querying LTA for stop {stop_id}: {e}")
-                    continue
-
-            all_results.append({
-                "flood_id": flood_event_id,
-                "affected_bus_services": sorted(list(affected_services)),
-                "candidate_stops": stops_list  
-            })
-
+                else:
+                    flood_line = geom_obj
+                    print(f"Using real geometry for edge {u}-{v}")
+                
+                flood_gdf = gpd.GeoDataFrame(geometry=[flood_line], crs="EPSG:4326").to_crs("EPSG:3414")
+                flood_buffer = flood_gdf.buffer(distance_threshold_m).unary_union
+                
+                candidate_stops = stops_gdf_3414[stops_gdf_3414.geometry.within(flood_buffer)]
+                print(f"Candidate stops near flood {flood_event_id}: {len(candidate_stops)}")
+                
+                stops_list = [
+                    {
+                        "stop_code": row["stop_code"],
+                        "stop_name": row["stop_name"],
+                        "stop_lat": row["stop_lat"],
+                        "stop_lon": row["stop_lon"],
+                        "distance_m": round(flood_gdf.distance(row.geometry).min(), 2)
+                    }
+                    for _, row in candidate_stops.iterrows()
+                ]
+                
+                affected_services = set()
+                stop_codes = [item["stop_code"] for item in stops_list]
+                
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                
+                def fetch_bus_services(stop_id):
+                    try:
+                        lta_resp = requests.get(
+                            f"{LTA_BUS_ARRIVAL_URL}?BusStopCode={stop_id}",
+                            headers=headers_lta,
+                            timeout=5 
+                        )
+                        if lta_resp.status_code == 200:
+                            lta_data = lta_resp.json()
+                            return [s.get("ServiceNo") for s in lta_data.get("Services", []) if s.get("ServiceNo")]
+                    except Exception as e:
+                        print(f"Error querying LTA for stop {stop_id}: {e}")
+                    return []
+                
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = {executor.submit(fetch_bus_services, stop_id): stop_id for stop_id in stop_codes}
+                    for future in as_completed(futures):
+                        services = future.result()
+                        affected_services.update(services)
+                
+                all_results.append({
+                    "flood_id": flood_event_id,
+                    "affected_bus_services": sorted(list(affected_services)),
+                    "candidate_stops": stops_list
+                })
+                
+            except Exception as e:
+                print(f"Error processing flood_id {flood_event_id}: {e}")
+                continue
+        
         return jsonify({"results": all_results}), 200
 
     except Exception as e:
