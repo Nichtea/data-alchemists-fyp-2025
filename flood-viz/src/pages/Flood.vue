@@ -234,14 +234,40 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
   }
 }
 
-/* ===================== Map rendering ===================== */
 function ensureMap() {
   if (map) return
-  map = L.map(mapEl.value as HTMLDivElement, { center: [1.3521, 103.8198], zoom: 12, zoomControl: true })
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map)
+
+  // Safety: warn if token is missing
+  const token = import.meta.env.VITE_MAPBOX_TOKEN
+  if (!token) {
+    console.warn('VITE_MAPBOX_TOKEN is missing. Add it to your .env')
+  }
+
+  map = L.map(mapEl.value as HTMLDivElement, {
+    center: [1.3521, 103.8198],
+    zoom: 12,
+    zoomControl: true,
+  })
+
+  // Use a Mapbox Studio style or a built-in one like 'mapbox/streets-v12'
+  const styleId = 'mapbox/streets-v12'
+
+  // Use 512px tiles with zoomOffset -1 (Mapbox recommendation for Leaflet)
+  L.tileLayer(
+    'https://api.mapbox.com/styles/v1/{id}/tiles/512/{z}/{x}/{y}@2x?access_token={accessToken}',
+    {
+      id: styleId,
+      accessToken: token,
+      tileSize: 512,
+      zoomOffset: -1,
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors ' +
+        '&copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+    }
+  ).addTo(map)
 }
+
 
 // index to “zoom to location”
 const groupByLocation = new Map<string, L.LayerGroup>()

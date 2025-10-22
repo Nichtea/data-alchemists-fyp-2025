@@ -7,10 +7,15 @@ import {
   getAllFloodEvents, getFloodEventById,
 } from '@/api/api'
 
+/* ========== Emits ========== */
+const emit = defineEmits<{
+  (e: 'flood-click', payload: { floodId: number }): void
+}>()
+
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
 
-// Layers
+/* Layers */
 let stopsLayer: L.LayerGroup | null = null
 let floodEventsLayer: L.LayerGroup | null = null
 let driveRouteLayer: L.LayerGroup | null = null
@@ -22,11 +27,10 @@ const store = useAppStore()
 
 /* ================= Flood hover: cache + single-owner tooltip ================= */
 const floodDetailCache = new Map<number, any>()
-const floodDetailPromise = new Map<number, Promise<any>>() // dedupe fetches
+const floodDetailPromise = new Map<number, Promise<any>>()
 
-// only one tooltip open at a time
 let openFloodTooltipOwner: L.Layer | null = null
-let floodHoverEpoch = 0 // increments on every hover to cancel stale responses
+let floodHoverEpoch = 0
 
 function openExclusiveTooltip(owner: L.Layer, html: string, latlng?: L.LatLng) {
   if (openFloodTooltipOwner && openFloodTooltipOwner !== owner) {
@@ -98,59 +102,31 @@ function pickNumNested(obj: any, keys: string[]): number | undefined {
   }
   return dfs(obj)
 }
-function fmtMinutes(val: any) {
-  const n = Number(val)
-  if (!Number.isFinite(n)) return '-'
-  return `${n.toFixed(2)} min`
-}
-function fmtMinutesForce(val: any) {
-  if (val === 0) return '0.00 min'
-  const n = Number(val)
-  if (!Number.isFinite(n)) return '-'
-  return `${n.toFixed(2)} min`
-}
-function fmtKmFromMeters(m: any) {
-  const n = Number(m)
-  if (!Number.isFinite(n)) return '-'
-  return `${(n / 1000).toFixed(3)} km`
-}
+const fmtMinutes = (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '-'
+const fmtMinutesForce = (n: any) => n === 0 || Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '-'
+const fmtKm = (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '-'
 
-/* ============== Tooltip content (with robust delay fallback) ============== */
+/* ============== Tooltip content ============== */
 function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
   const id = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '-'
   const roadName = detail?.road_name ?? 'Unknown'
   const roadType = detail?.road_type ?? 'unclassified'
   const lengthM  = detail?.length_m
 
-  const t20 = pickNumNested(detail, [
-    'time_20kmh_min','time_at_20_kmh_min','eta_20kmh_min','t_20min','time20','t20'
-  ])
-  const t50 = pickNumNested(detail, [
-    'time_50kmh_min','time_at_50_kmh_min','eta_50kmh_min','t_50min','time50','t50'
-  ])
-  const flooded = pickNumNested(detail, [
-    'flooded_time_min','eta_flooded_min','flood_time_min','eta_flooded'
-  ])
-  const baseline = pickNumNested(detail, [
-    'baseline_time_min','eta_baseline_min','normal_time_min','eta_baseline'
-  ])
-  let delay = pickNumNested(detail, [
-    'travel_delay_min','travel_delay','delay_min','delay','extra_time_min',
-    'additional_delay_min','impact_delay','traffic_delay'
-  ])
-  if (delay == null && flooded != null && baseline != null) delay = flooded - baseline
+  const t20 = pickNumNested(detail, ['time_20kmh_min','time_at_20_kmh_min','eta_20kmh_min','t20','time20'])
+  const t50 = pickNumNested(detail, ['time_50kmh_min','time_at_50_kmh_min','eta_50kmh_min','t50','time50'])
+  let delay = pickNumNested(detail, ['travel_delay_min','travel_delay','delay_min','delay','additional_delay_min'])
   if (delay == null && t20 != null && t50 != null) delay = Math.max(0, t20 - t50)
 
   return `
   <div class="flood-tt">
     <div class="tt-title">Flood details</div>
     <div class="tt-subtle">ID: ${id}</div>
-    <div class="tt-section">Event</div>
     <div class="tt-section">Road segment</div>
     <table class="tt-table">
       <tr><th>Road name</th><td>${roadName}</td></tr>
       <tr><th>Type</th><td>${roadType}</td></tr>
-      <tr><th>Length</th><td>${fmtKmFromMeters(lengthM)}</td></tr>
+      <tr><th>Length</th><td>${fmtKm(lengthM)}</td></tr>
     </table>
     <div class="tt-section">Traffic impact</div>
     <table class="tt-table">
@@ -161,7 +137,7 @@ function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = 
   </div>`
 }
 
-/* ================= Colored service polylines ================= */
+/* ================= Colored service polylines (kept intact) ================= */
 let coloredPolylinesGroup: L.LayerGroup | null = null
 function ensureColoredGroup() {
   if (!coloredPolylinesGroup) coloredPolylinesGroup = L.layerGroup().addTo(map)
@@ -184,6 +160,7 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
 ;(store as any).setColoredPolylines = setColoredPolylines
 ;(store as any).clearColoredPolylines = clearColoredPolylines
 
+/* Stops styles + selection (kept) */
 const STOP_STYLE_DEFAULT: L.CircleMarkerOptions = {
   radius: 3, color: '#0ea5e9', weight: 2, fillColor: '#38bdf8', fillOpacity: 0.9,
 }
@@ -200,14 +177,34 @@ function activateStopMarker(m: L.CircleMarker) {
   lastSelectedStopMarker = m
 }
 
+/* Map init */
 function ensureMap() {
   if (map) return
-  map = L.map(mapEl.value as HTMLDivElement, { center: [1.3521, 103.8198], zoom: 12, zoomControl: true })
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap', maxZoom: 19,
+
+  const token = import.meta.env.VITE_MAPBOX_TOKEN
+  const styleId = 'mapbox/streets-v12' // you can switch to 'mapbox/dark-v11', etc.
+
+  map = L.map(mapEl.value as HTMLDivElement, {
+    center: [1.3521, 103.8198],
+    zoom: 12,
+    zoomControl: true,
+  })
+
+  // ✅ Correct, type-safe way to inject the token into the URL
+  const url = `https://api.mapbox.com/styles/v1/${styleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`
+
+  L.tileLayer(url, {
+    tileSize: 512,
+    zoomOffset: -1,
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors ' +
+      '&copy; <a href="https://www.mapbox.com/">Mapbox</a>',
   }).addTo(map)
 }
 
+
+/* Clearers */
 function clearStopsOverlays() {
   if (stopsLayer) { map.removeLayer(stopsLayer); stopsLayer = null }
   if (lastSelectedStopMarker) lastSelectedStopMarker = null
@@ -228,7 +225,7 @@ function clearAllRouteOverlays() {
   clearRouteEndpoints()
 }
 
-/* ---------------- WKT helpers ---------------- */
+/* WKT → latlngs (used elsewhere) */
 function wktToLatLngs(wkt: string): [number, number][][] {
   const s = (wkt || '').trim()
   if (!s) return []
@@ -255,15 +252,24 @@ function wktToLatLngs(wkt: string): [number, number][][] {
     return arr.length ? [arr] : []
   }
 }
-function renderRoadSegmentFromDetail(detail: any) {
-  if (!detail || typeof detail.geometry !== 'string') return
+
+/* Draw flooded road segment(s) from detail.geometry; returns bounds if drawn */
+function renderRoadSegmentFromDetail(detail: any): L.LatLngBounds | null {
+  if (!detail || typeof detail.geometry !== 'string') return null
   const lineGroups = wktToLatLngs(detail.geometry)
-  if (!lineGroups.length) return
+  if (!lineGroups.length) return null
+
+  // clear previous
+  if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
+
   const group = L.layerGroup()
-  const baseStyle: L.PolylineOptions = { color: '#1d4ed8', weight: 8, opacity: 0.9, dashArray: '8,6' }
-  const roadName = detail.road_name ?? 'Road segment'
+  // 🔴 Flooded segments styled in red, bold line
+  const baseStyle: L.PolylineOptions = { color: '#dc2626', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }
+  const roadName = detail.road_name ?? 'Flooded road'
   const roadType = detail.road_type ?? '-'
   const lengthM  = Number(detail.length_m ?? 0)
+
+  const all: L.LatLng[] = []
   for (const latlngs of lineGroups) {
     const poly = L.polyline(latlngs, baseStyle)
     poly.bindTooltip(`${roadName}`, { sticky: true })
@@ -273,11 +279,30 @@ function renderRoadSegmentFromDetail(detail: any) {
       <div>Length: ${isFinite(lengthM) ? (lengthM/1000).toFixed(3) + ' km' : '-'}</div>
     `)
     group.addLayer(poly)
+    all.push(...latlngs.map(([la, lo]) => L.latLng(la, lo)))
   }
   roadSegmentLayer = group.addTo(map)
+
+  const b = all.length ? L.latLngBounds(all) : null
+  if (b && b.isValid()) return b
+  return null
 }
 
-/* ---------------- Pickers ---------------- */
+/* Helper to fetch detail by id and draw flooded roads on click */
+let clickEpoch = 0
+async function drawFloodSegmentById(floodId: number) {
+  const myEpoch = ++clickEpoch
+  try {
+    const detail = await getFloodDetailCached(Number(floodId))
+    if (myEpoch !== clickEpoch) return
+    const bounds = renderRoadSegmentFromDetail(detail)
+    if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.12))
+  } catch {
+    // swallow; tooltip already shows failure if hover triggered
+  }
+}
+
+/* Pickers */
 function pickStopFields(s: any) {
   const lat = s.lat ?? s.latitude ?? s.stop_lat
   const lon = s.lon ?? s.lng ?? s.longitude ?? s.stop_lon
@@ -301,7 +326,7 @@ function pickFloodFields(e: any) {
 let renderEpoch = 0
 let detailEpoch = 0
 
-/* Async renders take an epoch and bail if it changed */
+/* Async renders with epoch */
 async function renderStops(epoch: number) {
   clearStopsOverlays()
   if (!store.layers.stops) return
@@ -345,6 +370,7 @@ async function renderFloodEvents(epoch: number) {
     const picked = pickFloodFields(ev)
     if (!picked.id) continue
 
+    // GeoJSON flood shapes
     if (picked.hasGeometry && picked.geometry) {
       const feature = { type: 'Feature', geometry: picked.geometry, properties: { id: picked.id, name: picked.name } }
       const geo = L.geoJSON(feature as any, {
@@ -373,18 +399,11 @@ async function renderFloodEvents(epoch: number) {
         child.on('mouseout', () => closeTooltipOwner(child))
       })
 
+      // ✅ Emit flood id on click AND draw flooded roads
       geo.on('click', async () => {
-        store.setSelectedFloodLoading(true)
-        const dEpoch = detailEpoch
-        try {
-          store.selectFlood(picked.id)
-          const detail = await getFloodEventById(Number(picked.id))
-          if (dEpoch !== detailEpoch) return
-          store.setSelectedFlood(detail)
-          store.setActiveTab('flood')
-          renderRoadSegmentFromDetail(Array.isArray(detail) ? detail[0] : detail)
-        } finally {
-          store.setSelectedFloodLoading(false)
+        if (picked.id) {
+          emit('flood-click', { floodId: Number(picked.id) })
+          await drawFloodSegmentById(Number(picked.id))
         }
       })
 
@@ -392,6 +411,7 @@ async function renderFloodEvents(epoch: number) {
       continue
     }
 
+    // Point fallback
     if (!Number.isFinite(picked.lat!) || !Number.isFinite(picked.lon!)) continue
 
     const marker = L.circleMarker([picked.lat!, picked.lon!], {
@@ -415,18 +435,11 @@ async function renderFloodEvents(epoch: number) {
     })
     marker.on('mouseout', () => closeTooltipOwner(marker))
 
+    // ✅ Emit flood id on click AND draw flooded roads
     marker.on('click', async () => {
-      store.setSelectedFloodLoading(true)
-      const dEpoch = detailEpoch
-      try {
-        store.selectFlood(picked.id)
-        const detail = await getFloodEventById(Number(picked.id))
-        if (dEpoch !== detailEpoch) return
-        store.setSelectedFlood(detail)
-        store.setActiveTab('flood')
-        renderRoadSegmentFromDetail(Array.isArray(detail) ? detail[0] : detail)
-      } finally {
-        store.setSelectedFloodLoading(false)
+      if (picked.id) {
+        emit('flood-click', { floodId: Number(picked.id) })
+        await drawFloodSegmentById(Number(picked.id))
       }
     })
 
@@ -437,10 +450,9 @@ async function renderFloodEvents(epoch: number) {
   floodEventsLayer = group.addTo(map)
 }
 
-/* -------------------- Route endpoints (Big obvious markers) -------------------- */
+/* -------------------- Route endpoints (kept) -------------------- */
 let routeStartMarker: L.Marker | null = null
 let routeEndMarker: L.Marker | null = null
-
 function createEndpointIcon(label: 'START' | 'END', variant: 'start' | 'end') {
   const html = `
     <div class="ep ${variant}">
@@ -451,16 +463,10 @@ function createEndpointIcon(label: 'START' | 'END', variant: 'start' | 'end') {
       </svg>
       <div class="badge">${label}</div>
     </div>`
-  return L.divIcon({
-    className: 'ep-wrap',
-    html,
-    iconSize: [1, 1],
-    iconAnchor: [16, 44],
-  })
+  return L.divIcon({ className: 'ep-wrap', html, iconSize: [1, 1], iconAnchor: [16, 44] })
 }
 const startIcon = createEndpointIcon('START', 'start')
 const endIcon   = createEndpointIcon('END', 'end')
-
 function clearRouteEndpoints() {
   if (routeStartMarker) { routeStartMarker.remove(); routeStartMarker = null }
   if (routeEndMarker)   { routeEndMarker.remove();   routeEndMarker = null }
@@ -479,33 +485,24 @@ function setRouteEndpoints(start: {lat:number, lon:number} | null, end: {lat:num
   }
 }
 
+/* Render orchestrator */
 async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
   ++detailEpoch
 
-  // If Flood layer is ON, clear any active route overlays + chart (single place!)
   if (store.layers.floodEvents) {
+    // when flood layer on, clear other route overlays + chart
     clearAllRouteOverlays()
     ;(store as any).serviceRouteOverlay = null
     ;(store as any).showTravelTimeChart = false
   }
 
-  // Toggleables
-  if (store.layers.stops) {
-    await renderStops(epoch)
-  } else {
-    clearStopsOverlays()
-  }
-
-  if (store.layers.floodEvents) {
-    await renderFloodEvents(epoch)
-  } else {
-    clearFloodOverlays()
-  }
+  if (store.layers.stops) await renderStops(epoch); else clearStopsOverlays()
+  if (store.layers.floodEvents) await renderFloodEvents(epoch); else clearFloodOverlays()
 }
 
-/* =================== Layer toggle Leaflet control =================== */
+/* Small UI control to toggle stops layer */
 let uiCheckboxStops: HTMLInputElement | null = null
 function addLayerToggleControl() {
   const C = L.Control.extend({
@@ -541,10 +538,8 @@ function addLayerToggleControl() {
         store.layers.stops = on
         if (on) store.layers.floodEvents = false
       })
-
       return div
-    },
-    onRemove: () => {}
+    }
   })
   new C({ position: 'topleft' }).addTo(map)
 }
@@ -559,17 +554,12 @@ onMounted(async () => {
 })
 watch(() => ({ ...store.layers }), () => renderLayers(), { deep: true })
 watch(() => store.activeTab, (tab) => {
-  if (tab === 'stops') {
-    store.layers.stops = true
-    store.layers.floodEvents = false
-  } else if (tab === 'flood') {
-    store.layers.floodEvents = true
-    store.layers.stops = false
-  }
+  if (tab === 'stops') { store.layers.stops = true;  store.layers.floodEvents = false }
+  else if (tab === 'flood') { store.layers.floodEvents = true; store.layers.stops = false }
   renderLayers()
 })
 
-/* ======= Other optional overlays ======= */
+/* ======= Other optional overlays (unchanged) ======= */
 let originMarker: L.Layer | null = null
 let destMarker: L.Layer | null = null
 function clear(l: L.Layer | null) { if (l && map) map.removeLayer(l) }
@@ -625,10 +615,7 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
   if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
   clearRouteEndpoints()
 
-  if (!o) {
-    clearColoredPolylines()
-    return
-  }
+  if (!o) { clearColoredPolylines(); return }
 
   if (Array.isArray(o?.polylines) && o.polylines.length) {
     setColoredPolylines(o.polylines)
@@ -673,42 +660,29 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
 </template>
 
 <style>
-.flood-tooltip {
-  padding: 0 !important;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
+.flood-tooltip { padding: 0 !important; border: 0; background: transparent; box-shadow: none; }
 .flood-tt {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
-  padding: 10px 12px;
+  background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 10px 12px;
   font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
-  color: #111827;
-  max-width: 260px;
+  color: #111827; max-width: 260px;
 }
 .flood-tt .tt-title { font-weight: 600; margin-bottom: 2px; }
 .flood-tt .tt-subtle { color: #6b7280; font-size: 11px; margin-bottom: 8px; }
 .flood-tt .tt-section { margin-top: 8px; font-weight: 600; color: #374151; }
 .flood-tt .tt-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-.flood-tt .tt-table th,
-.flood-tt .tt-table td { border: 1px solid #e5e7eb; padding: 4px 6px; vertical-align: top; font-size: 12px; }
+.flood-tt .tt-table th, .flood-tt .tt-table td { border: 1px solid #e5e7eb; padding: 4px 6px; vertical-align: top; font-size: 12px; }
 .flood-tt .tt-table th { width: 48%; background: #f9fafb; color: #374151; font-weight: 600; }
 
 /* START/END icons */
 .ep-wrap { pointer-events: none; }
 .ep { position: relative; transform: translate(-16px, -44px); filter: drop-shadow(0 6px 12px rgba(0,0,0,.25)); user-select: none; }
 .ep .pin-svg { width: 32px; height: 44px; display: block; }
-.ep.start .pin-svg path { fill: #2563eb; }
-.ep.start .pin-svg circle { fill: #dbeafe; }
-.ep.end .pin-svg path { fill: #16a34a; }
-.ep.end .pin-svg circle { fill: #dcfce7; }
+.ep.start .pin-svg path { fill: #2563eb; } .ep.start .pin-svg circle { fill: #dbeafe; }
+.ep.end .pin-svg path { fill: #16a34a; } .ep.end .pin-svg circle { fill: #dcfce7; }
 .ep .badge { margin-top: 4px; padding: 4px 10px; font: 12px/1.1 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; font-weight: 800; letter-spacing: .5px; border-radius: 999px; border: 1px solid rgba(17,24,39,.12); background: #fff; color: #111827; white-space: nowrap; text-transform: uppercase; display: inline-block; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .ep .pulse { position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 999px; background: currentColor; opacity: .25; animation: ep-pulse 1.8s ease-out infinite; transform: scale(1); filter: blur(2px); }
-.ep.start { color: #3b82f6; }
-.ep.end   { color: #22c55e; }
+.ep.start { color: #3b82f6; } .ep.end { color: #22c55e; }
 @keyframes ep-pulse { 0% { opacity: .35; transform: scale(1); } 60% { opacity: .10; transform: scale(2.3); } 100% { opacity: 0; transform: scale(2.8); } }
 </style>
 
