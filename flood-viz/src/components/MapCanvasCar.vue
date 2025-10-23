@@ -8,7 +8,7 @@ interface CarRoute {
   label: string
   duration_s?: number
   distance_m?: number
-  polylines: [number, number][][] // 多段 [[lat,lon], ...]
+  polylines: [number, number][][] // [[lat,lon], ...] segments
   flooded_segments?: [number, number][][] | null
 }
 
@@ -20,7 +20,7 @@ const props = defineProps<{
 }>()
 
 const mapEl = ref<HTMLDivElement | null>(null)
-let map: L.Map
+let map: L.Map | null = null
 
 let routesLayer: L.LayerGroup | null = null
 let floodedLayer: L.LayerGroup | null = null
@@ -28,14 +28,38 @@ let endpointsLayer: L.LayerGroup | null = null
 
 function ensureMap() {
   if (map) return
-  map = L.map(mapEl.value as HTMLDivElement, { center: [1.3521, 103.8198], zoom: 12, zoomControl: true })
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap', maxZoom: 19,
-  }).addTo(map)
+
+  const token = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined
+  const styleId = 'mapbox/streets-v12' // try 'mapbox/dark-v11', 'mapbox/light-v11', etc.
+
+  map = L.map(mapEl.value as HTMLDivElement, {
+    center: [1.3521, 103.8198],
+    zoom: 12,
+    zoomControl: true,
+  })
+
+  if (token && token.trim().length > 0) {
+    // Retina-friendly 512px tiles; no explicit color styles needed
+    const url = `https://api.mapbox.com/styles/v1/${styleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`
+    L.tileLayer(url, {
+      tileSize: 512,
+      zoomOffset: -1,
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors ' +
+        '&copy; <a href="https://www.mapbox.com/">Mapbox</a>',
+    }).addTo(map)
+  } else {
+    console.warn('[MapCanvasCar] VITE_MAPBOX_TOKEN is missing — falling back to OSM tiles.')
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap',
+      maxZoom: 19,
+    }).addTo(map)
+  }
 }
 
 function clearLayer(l: L.LayerGroup | null, assign?: (v: null) => void) {
-  if (l) { map.removeLayer(l) }
+  if (l && map) { map.removeLayer(l) }
   if (assign) assign(null)
 }
 
@@ -50,7 +74,7 @@ function fmtDist(m?: number) {
   return `${k.toFixed(2)} km`
 }
 
-// 让选中路线（数组第 1 个）更突出
+// Make selected route (index 0) stand out
 function polyStyle(isPrimary: boolean, color: string): L.PolylineOptions {
   return {
     color,
@@ -61,6 +85,8 @@ function polyStyle(isPrimary: boolean, color: string): L.PolylineOptions {
 }
 
 function renderRoutes() {
+  if (!map) return
+
   clearLayer(routesLayer, v => routesLayer = v)
   clearLayer(floodedLayer, v => floodedLayer = v)
   clearLayer(endpointsLayer, v => endpointsLayer = v)
@@ -72,7 +98,7 @@ function renderRoutes() {
   const bounds: L.LatLng[] = []
   const palette = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#0ea5e9']
 
-  // 所有路线
+  // All routes
   props.routes.forEach((r, idx) => {
     const color = palette[idx % palette.length]
     r.polylines.forEach(seg => {
@@ -85,7 +111,7 @@ function renderRoutes() {
         group.addLayer(line)
         bounds.push(...latlngs)
 
-        // 若整体 flooded 但没有明确段落，则对“主路线”叠加红色提示层
+        // If overall flooded but no explicit flooded segments, overlay a subtle warning on the primary route
         if (isPrimary && props.overallStatus === 'flooded' && !(r.flooded_segments && r.flooded_segments.length)) {
           const warn = L.polyline(latlngs, {
             color: '#dc2626',
@@ -98,7 +124,7 @@ function renderRoutes() {
       }
     })
 
-    // 明确的被淹路段（红色突出）
+    // Explicit flooded segments (bold red)
     if (r.flooded_segments && Array.isArray(r.flooded_segments)) {
       r.flooded_segments.forEach(seg => {
         const latlngs = seg.map(([la, lo]) => L.latLng(la, lo))
@@ -111,7 +137,7 @@ function renderRoutes() {
     }
   })
 
-  // 起终点（更醒目的大图钉）
+  // Endpoints (distinct pins)
   const mkPin = (color: string, label: string) => L.divIcon({
     className: 'custom-pin',
     html: `

@@ -5,7 +5,7 @@ import MapCanvasCar from '@/components/MapCanvasCar.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import AddressDetailsPanel from '@/components/AddressDetailsPanel.vue'
 import { getOnemapCarRoute } from '@/api/api'
-import mockRouteResp from '@/mocks/mock.json'
+// import mockRouteResp from '@/mocks/mock.json'
 const USE_MOCK = false
 
 // ======== UI State ========
