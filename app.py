@@ -8,10 +8,14 @@ from src.routes.car_trips_routes import car_trips_route
 from src.routes.bus_routes import bus_route
 from src.routes.flood_events_routes import flood_events_route
 from src.routes.traffic_routes import traffic_route
+from src.utils.onemap_auth import get_valid_token, refresh_onemap_token
 
 def create_app():
     app = Flask(__name__,template_folder="src/templates")
     load_dotenv()
+    print("Checking OneMap token status...")
+    token = get_valid_token()  
+    os.environ["ONEMAP_API_KEY"] = token  
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
     swagger = Swagger(app)
     app.register_blueprint(car_trips_route)
