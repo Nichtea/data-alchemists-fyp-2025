@@ -268,11 +268,6 @@ async function fetchRoute() {
         @search="fetchRoute"
       />
 
-      <!-- Optional chart when simulation present -->
-      <div v-if="chartEntry" class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
-        <TravelTimeBarChart :entry="chartEntry" title="Time Travel Simulation" />
-      </div>
-
       <!-- Route options -->
       <div v-if="allRoutesRaw.length" class="bg-white rounded-2xl shadow-sm p-3 border border-gray-100">
         <div class="flex items-center justify-between mb-2">
@@ -337,14 +332,23 @@ async function fetchRoute() {
       </div>
     </div>
 
-    <!-- RIGHT: Map -->
+    <!-- RIGHT: Chart + Map -->
     <div class="col-span-9">
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 h-[calc(100vh-3rem)] p-3 flex flex-col">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-sm font-medium text-gray-700">Car Route Map</h3>
-          <div v-if="routes.length" class="text-xs text-gray-500">Showing {{ routes.length }} route(s)</div>
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 h-[calc(100vh-3rem)] p-3 flex flex-col space-y-4">
+
+        <!-- Moved chart here -->
+        <div v-if="chartEntry" class="bg-gray-50 rounded-xl border border-gray-100 p-4">
+          <TravelTimeBarChart :entry="chartEntry" title="Time Travel Simulation" />
         </div>
+
+        <!-- Map section -->
         <div class="flex-1 min-h-0 overflow-hidden rounded-xl border border-gray-100">
+          <div class="flex items-center justify-between mb-2 px-3 pt-2">
+            <h3 class="text-sm font-medium text-gray-700">Car Route Map</h3>
+            <div v-if="routes.length" class="text-xs text-gray-500">
+              Showing {{ routes.length }} route(s)
+            </div>
+          </div>
           <MapCanvasCar
             :routes="routes"
             :overall-status="overallStatus"
@@ -356,3 +360,4 @@ async function fetchRoute() {
     </div>
   </div>
 </template>
+
