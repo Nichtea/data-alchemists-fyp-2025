@@ -200,9 +200,8 @@ export type OneMapPtLeg = {
   // Augmented by backend
   non_flooded_bus_duration?: number
   flooded_bus_duration_5kmh?: number
-  flooded_bus_duration_12kmh?: number
-  flooded_bus_duration_30kmh?: number
-  flooded_bus_duration_48kmh?: number
+  flooded_bus_duration_10kmh?: number
+  flooded_bus_duration_20kmh?: number
 }
 
 export type OneMapPtItinerary = {
@@ -372,7 +371,7 @@ export async function getBusTripsDelay(
   stopId: string | number,
   endAreaCode: string,
   extra?: { // 可选参数：按需扩展
-    speed_kmh?: 5 | 12 | 30 | 48
+    speed_kmh?: 5 | 10 | 20 
   }
 ): Promise<any> {
   return await getJSON<any>(PATHS.busTripsDelay, {

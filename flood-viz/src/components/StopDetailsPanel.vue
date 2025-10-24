@@ -410,9 +410,8 @@ function legIsFlooded(leg: any): boolean {
   if (!Number.isFinite(base)) return false
   const candidates = [
     toNumOrUndefined(leg['5kmh_flooded_bus_duration']),
-    toNumOrUndefined(leg['12kmh_flooded_bus_duration']),
-    toNumOrUndefined(leg['30kmh_flooded_bus_duration']),
-    toNumOrUndefined(leg['48kmh_flooded_bus_duration']),
+    toNumOrUndefined(leg['10kmh_flooded_bus_duration']),
+    toNumOrUndefined(leg['20kmh_flooded_bus_duration']),
   ].filter((x): x is number => Number.isFinite(x as any))
   return candidates.some(v => v! > (base as number))
 }
@@ -436,9 +435,8 @@ function summarizeFloodDurations(legs: any[]) {
     // flooded scenarios
     const pairs: Array<[label: string, key: string]> = [
       ['5 km/h flooded',  '5kmh_flooded_bus_duration'],
-      ['12 km/h flooded', '12kmh_flooded_bus_duration'],
-      ['30 km/h flooded', '30kmh_flooded_bus_duration'],
-      ['48 km/h flooded', '48kmh_flooded_bus_duration'],
+      ['10 km/h flooded', '10kmh_flooded_bus_duration'],
+      ['20 km/h flooded', '20kmh_flooded_bus_duration'],
     ]
     for (const [label, key] of pairs) {
       const v = toNumOrUndefined((leg as any)[key])
