@@ -1,5 +1,5 @@
 from flask import Blueprint
-from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id, get_bus_trip_delay, get_unique_end_area_codes, get_bus_trip_segment_delay, get_onemap_route)
+from src.controllers.bus_controller import (get_all_bus_stops, get_bus_stop_by_stop_code, get_all_bus_trip, get_bus_trip_by_id,get_all_bus_trip_segment, get_bus_trip_segment_by_id, get_unique_end_area_codes, get_bus_trip_segment_delay, get_onemap_route)
 from flasgger import swag_from
 from ..examples_for_doc.bus_api_examples import *
 from ..examples_for_doc.bus_related_schemas import *
@@ -121,36 +121,6 @@ def bus_trip_segment_by_id(bus_trip_id):
 
     return get_bus_trip_segment_by_id(bus_trip_id)
 
-@bus_route.route('/bus_trips/delay', methods=['GET'])
-@swag_from({
-    "tags": ["Bus"],
-    "parameters": [
-        {"name": "stop_id", "in": "query", "type": "string", "required": True, "description": "Starting bus stop ID"},
-        {"name": "trip_end_area_code", "in": "query", "type": "string", "required": True, "description": "End area code for trip destination"}
-    ],
-    "responses": {
-        200: {
-            "description": "List of delayed bus trips with nested segment delay info",
-            "schema": bus_delayed_schema,
-            "examples": {"application/json": bus_trips_delayed_example}
-        },
-        400: {
-            "description": "Missing required query parameters",
-            "schema": {"type": "object", "properties": {"error": {"type": "string", "example": "stop_id and trip_end_area_code are required"}}}
-        },
-        404: {
-            "description": "No bus trips found for given criteria",
-            "schema": {"type": "object", "properties": {"error": {"type": "string", "example": "No bus trips found for given criteria"}}}
-        },
-        500: {
-            "description": "Internal server error",
-            "schema": {"type": "object", "properties": {"error": {"type": "string", "example": "Server error occurred"}}}
-        }
-    }
-})
-def bus_trips_with_delay():
-
-    return get_bus_trip_delay()
 
 @bus_route.route('/bus_trips/end_area_codes', methods=['GET'])
 def bus_trips_end_area_codes():
