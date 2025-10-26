@@ -1,4 +1,3 @@
-<!-- src/pages/PrivateTransport.vue -->
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import MapCanvasCar from '@/components/MapCanvasCar.vue'
@@ -10,21 +9,22 @@ const USE_MOCK = false
 
 // ======== UI State ========
 const startAddress = ref('143 Victoria St, Singapore 188019')
-const endAddress = ref('961 Bukit Timah Rd, Singapore 588179')
+const endAddress   = ref('961 Bukit Timah Rd, Singapore 588179')
 const date = ref<string>('') // optional: YYYY-MM-DD
 const time = ref<string>('') // optional: HH:mm
 
-const loading = ref(false)
+const loading  = ref(false)
 const errorMsg = ref<string | null>(null)
 
 const routeResp = ref<any | null>(null)
-
 const selectedIdx = ref<number>(0)
 
 // ======== helpers ========
 const overallStatus = computed<'clear' | 'flooded' | undefined>(
   () => routeResp.value?.overall_route_status
 )
+
+// This remains the *response-level* simulation (fallback only)
 const simulation = computed<any | null>(
   () => routeResp.value?.time_travel_simulation || null
 )
@@ -51,13 +51,13 @@ function normalizeToPolylineList(route: any): [number, number][][] {
 
   // 1) encoded polyline in `route_geometry` / `encoded`
   if (typeof route?.route_geometry === 'string') return [decodePolyline(route.route_geometry)]
-  if (typeof route?.encoded === 'string') return [decodePolyline(route.encoded)]
+  if (typeof route?.encoded === 'string')        return [decodePolyline(route.encoded)]
 
   // 2) direct list like [[lon,lat] or [lat,lon]]
   const direct = route.polyline || route.path || route.points
   if (Array.isArray(direct) && direct.length && Array.isArray(direct[0])) {
     const guess = direct[0]
-    const looksLonLat = Math.abs(guess[0]) > Math.abs(guess[1]) // 新加坡经度绝对值 > 纬度
+    const looksLonLat = Math.abs(guess[0]) > Math.abs(guess[1])
     const mapped = direct.map((p: any) => {
       const a = Number(p[0]), b = Number(p[1])
       return looksLonLat ? [b, a] as [number, number] : [a, b] as [number, number]
@@ -80,11 +80,8 @@ function normalizeToPolylineList(route: any): [number, number][][] {
   return []
 }
 
-
 function normalizeFloodedSegments(r: any): [number, number][][] | null {
-  
   if (Array.isArray(r?.flooded_segments) && r.flooded_segments.length) {
-    
     const segs: [number, number][][] = []
     for (const seg of r.flooded_segments) {
       if (Array.isArray(seg) && seg.length) {
@@ -97,7 +94,6 @@ function normalizeFloodedSegments(r: any): [number, number][][] | null {
     if (segs.length) return segs
   }
 
-  
   if (typeof r?.flooded_geometry === 'string') {
     return [decodePolyline(r.flooded_geometry)]
   }
@@ -105,13 +101,14 @@ function normalizeFloodedSegments(r: any): [number, number][][] | null {
   return null
 }
 
-
 const allRoutesRaw = computed(() => {
   if (!routeResp.value) return []
 
   const main = routeResp.value
-  const phy = routeResp.value?.phyroute
-  const alts = Array.isArray(routeResp.value?.alternativeroute) ? routeResp.value.alternativeroute : []
+  const phy  = routeResp.value?.phyroute
+  const alts = Array.isArray(routeResp.value?.alternativeroute)
+    ? routeResp.value.alternativeroute
+    : []
 
   const list: any[] = []
   if (main && (main.route_geometry || main.geometry || main.encoded)) {
@@ -127,7 +124,6 @@ const allRoutesRaw = computed(() => {
   }
   return list
 })
-
 
 const routes = computed(() => {
   const list = allRoutesRaw.value
@@ -152,14 +148,21 @@ const routes = computed(() => {
       duration_s: Number.isFinite(duration_s) ? duration_s : undefined,
       distance_m: Number.isFinite(distance_m) ? distance_m : undefined,
       polylines: lines,
-      flooded_segments: normalizeFloodedSegments(r), 
+      flooded_segments: normalizeFloodedSegments(r),
     }
   })
 
   const sel = Math.min(Math.max(selectedIdx.value ?? 0, 0), items.length - 1)
-  
   const [picked] = items.splice(sel, 1)
   return [picked, ...items]
+})
+
+// The raw object of the currently selected route (for chart + details)
+const selectedRouteRaw = computed<any | null>(() => {
+  const list = allRoutesRaw.value
+  if (!list.length) return null
+  const idx = Math.min(Math.max(selectedIdx.value ?? 0, 0), list.length - 1)
+  return list[idx]
 })
 
 const endpoints = computed(() => {
@@ -181,22 +184,36 @@ function sec(n: any): number | undefined {
   const v = Number(n); return Number.isFinite(v) ? Math.round(v) : undefined
 }
 
+/**
+ * Build the chart entry using the SELECTED route first.
+ * Fallback order for durations:
+ *   1) selectedRouteRaw.time_travel_simulation.*
+ *   2) response-level time_travel_simulation.*
+ *   3) selectedRouteRaw.route_summary.total_time (as baseline only)
+ */
 const chartEntry = computed(() => {
-  const sim = simulation.value
-  if (!sim) return null
+  const r = selectedRouteRaw.value
+  if (!r) return null
 
+  // Prefer per-route simulation; else fall back to response-level simulation.
+  const sim = r.time_travel_simulation || simulation.value || null
+
+  // CLEAR (baseline) duration
   const clear_s =
-    sec(sim.clear_duration_s ?? sim.clear_s) ??
-    minToSec(sim.t_clear_min ?? sim.clear_time_min) ??
-    sec(routeResp.value?.route_summary?.total_time)
+    sec(sim?.clear_duration_s ?? sim?.clear_s) ??
+    minToSec(sim?.t_clear_min ?? sim?.clear_time_min) ??
+    // last fallback: selected route's reported total_time
+    sec(r?.summary?.duration_s) ??
+    sec(r?.route_summary?.total_time)
 
+  // FLOODED duration or delay
   const flood_s_from_field =
-    sec(sim.flood_duration_s ?? sim.flood_s) ??
-    minToSec(sim.t_flood_min ?? sim.flood_time_min)
+    sec(sim?.flood_duration_s ?? sim?.flood_s) ??
+    minToSec(sim?.t_flood_min ?? sim?.flood_time_min)
 
   const delay_s =
-    sec(sim.delay_s) ??
-    minToSec(sim.delay_min ?? sim.additional_delay_min)
+    sec(sim?.delay_s) ??
+    minToSec(sim?.delay_min ?? sim?.additional_delay_min)
 
   const flood_s = flood_s_from_field ?? (
     clear_s != null && delay_s != null ? clear_s + delay_s : undefined
@@ -229,9 +246,9 @@ async function fetchRoute() {
   loading.value = true
   try {
     let res: any
-
     if (USE_MOCK) {
-      res = mockRouteResp
+      // res = mockRouteResp
+      throw new Error('Mock disabled in this build.')
     } else {
       res = await getOnemapCarRoute({
         start_address: startAddress.value.trim(),
@@ -240,7 +257,6 @@ async function fetchRoute() {
         time: time.value || undefined,
       })
     }
-
     if (!res || typeof res !== 'object') throw new Error('Empty response')
     routeResp.value = res
     await nextTick()
@@ -250,7 +266,6 @@ async function fetchRoute() {
     loading.value = false
   }
 }
-
 </script>
 
 <template>
