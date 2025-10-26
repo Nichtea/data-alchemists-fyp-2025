@@ -26,8 +26,8 @@ const toWGS84 = (x: number, y: number): [number, number] => {
 // ─────────────────────────────────────────────────────────────
 const loading = ref(true)
 const errorMsg = ref<string | null>(null)
-const infoMsg = ref<string | null>(null)        // e.g., "No critical roads near flood"
-const bufferM = ref<number>(50)
+const infoMsg  = ref<string | null>(null) // e.g., "No critical roads near flood"
+const bufferM  = ref<number>(50)
 
 const eventsAll = ref<any[]>([])
 const q = ref('')
@@ -74,29 +74,18 @@ const fmt = {
 }
 
 function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
-  // Safe field extraction with fallbacks
-  const id       = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '—'
-  const loc      = detail?.flooded_location ?? detail?.name ?? fallback?.name ?? 'Flood event'
-  const startedAt= detail?.started_at ?? detail?.start_time ?? detail?.timestamp
+  const id        = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '—'
+  const loc       = detail?.flooded_location ?? detail?.name ?? fallback?.name ?? 'Flood event'
+  const startedAt = detail?.started_at ?? detail?.start_time ?? detail?.timestamp
 
   const roadName = (typeof detail?.road_name === 'string' && detail.road_name.trim())
-    ? detail.road_name
-    : 'Unnamed Road'
+    ? detail.road_name : 'Unnamed Road'
   const roadType = detail?.road_type ?? '—'
   const lenM     = Number(detail?.length_m)
 
-  // Traffic metrics (minutes)
-  const t20  = Number(detail?.time_20kmh_min)
-  const t50  = Number(detail?.time_50kmh_min)
-  const delay= Number(detail?.time_travel_delay_min ?? detail?.delay_min ?? detail?.delay)
-
-  // Small helpers
-  const fmtMin = (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '—'
-  const fmtKm  = (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '—'
-  const fmtDate= (s: any) => {
-    if (!s) return '—'
-    try { return new Date(s).toLocaleString() } catch { return String(s) }
-  }
+  const t20   = Number(detail?.time_20kmh_min)
+  const t50   = Number(detail?.time_50kmh_min)
+  const delay = Number(detail?.time_travel_delay_min ?? detail?.delay_min ?? detail?.delay)
 
   return `
     <div class="flood-tt">
@@ -106,21 +95,21 @@ function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = 
       <div class="tt-section">Location</div>
       <table class="tt-table">
         <tr><th>Name</th><td>${loc}</td></tr>
-        <tr><th>Start</th><td>${fmtDate(startedAt)}</td></tr>
+        <tr><th>Start</th><td>${fmt.date(startedAt)}</td></tr>
       </table>
 
       <div class="tt-section">Road segment</div>
       <table class="tt-table">
         <tr><th>Road name</th><td>${roadName}</td></tr>
         <tr><th>Type</th><td>${roadType}</td></tr>
-        <tr><th>Length</th><td>${fmtKm(lenM)}</td></tr>
+        <tr><th>Length</th><td>${fmt.km(lenM)}</td></tr>
       </table>
 
       <div class="tt-section">Traffic impact</div>
       <table class="tt-table">
-        <tr><th>Time @ 20 km/h</th><td>${fmtMin(t20)}</td></tr>
-        <tr><th>Time @ 50 km/h</th><td>${fmtMin(t50)}</td></tr>
-        <tr><th>Travel delay</th><td>${fmtMin(delay)}</td></tr>
+        <tr><th>Time @ 20 km/h</th><td>${fmt.min(t20)}</td></tr>
+        <tr><th>Time @ 50 km/h</th><td>${fmt.min(t50)}</td></tr>
+        <tr><th>Travel delay</th><td>${fmt.min(delay)}</td></tr>
       </table>
     </div>`
 }
@@ -139,7 +128,7 @@ function ensureMap() {
   if (map) return
 
   const token = import.meta.env.VITE_MAPBOX_TOKEN
-  const styleId = 'mapbox/streets-v12' // you can switch to 'mapbox/dark-v11', etc.
+  const styleId = 'mapbox/streets-v12'
 
   map = L.map(mapEl.value as HTMLDivElement, {
     center: [1.3521, 103.8198],
@@ -147,7 +136,6 @@ function ensureMap() {
     zoomControl: true,
   })
 
-  // ✅ Correct, type-safe way to inject the token into the URL
   const url = `https://api.mapbox.com/styles/v1/${styleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`
 
   L.tileLayer(url, {
@@ -158,6 +146,30 @@ function ensureMap() {
       '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors ' +
       '&copy; <a href="https://www.mapbox.com/">Mapbox</a>',
   }).addTo(map)
+}
+
+/** Style A — Minimal, clean SVG pin as a DivIcon (no external assets) */
+function makeFloodIcon(selected: boolean) {
+  // colors
+  const fill = selected ? '#dc2626' : '#2563eb'   // red / blue
+  const stroke = selected ? '#991b1b' : '#1e3a8a'
+
+  const svg = `
+  <svg viewBox="0 0 32 40" width="32" height="40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <!-- pin shape -->
+    <path d="M16 0C8.28 0 2 6.28 2 14c0 8.28 9.1 18.22 13.08 22.07a1.5 1.5 0 0 0 2.06 0C20.1 32.22 30 22.28 30 14 30 6.28 23.72 0 16 0z"
+          fill="${fill}" stroke="${stroke}" stroke-width="2" />
+    <!-- inner dot -->
+    <circle cx="16" cy="14" r="5.2" fill="white"/>
+  </svg>`
+  return L.divIcon({
+    className: 'flood-pin',       // styled in <style> below
+    html: svg,
+    iconSize: [32, 40],
+    iconAnchor: [16, 40],         // tip sits exactly on the lat/lng
+    popupAnchor: [0, -36],
+    tooltipAnchor: [0, -36],
+  })
 }
 
 function clearCritical() {
@@ -178,9 +190,10 @@ function renderFloodMarkers() {
     const lon = e.longitude ?? e.lon ?? e.center_lon ?? e.lng
     if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) continue
 
-    const marker = L.circleMarker([+lat, +lon], {
-      radius: 7, color: '#1e40af', weight: 3, fillColor: '#3b82f6', fillOpacity: 0.95,
-      className: 'flood-marker',
+    const isSelected = selectedFloodId.value === Number(e.flood_id ?? e.id)
+
+    const marker = L.marker([+lat, +lon], {
+      icon: makeFloodIcon(isSelected),
     })
     .bindTooltip(
       `<div class="flood-tt"><div class="tt-title">${name || 'Flood event'}</div><div class="tt-subtle">ID: ${e.flood_id ?? e.id ?? '—'}</div></div>`,
@@ -219,6 +232,8 @@ function onSelectFloodRow(e: any) {
     return
   }
   selectedFloodId.value = id
+  // re-render to recolor the selected marker
+  renderFloodMarkers()
   fetchAndDrawCritical(id)
 }
 
@@ -243,8 +258,7 @@ async function fetchAndDrawCritical(fid: number) {
       // Backend returned: { "message": "No critical roads near flood" }
       lastPayload.value = null
       infoMsg.value = (payload as any).message || 'No critical roads near this flood.'
-      // Still draw the flood point if available from events list
-      drawOnlyFloodPoint(fid)
+      drawOnlyFloodPoint(fid) // still show the point
       return
     }
 
@@ -265,14 +279,10 @@ function drawOnlyFloodPoint(fid: number) {
   const lon = evt?.longitude ?? evt?.lon ?? evt?.center_lon ?? evt?.lng
   if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return
 
-  // dot only, no tooltip
+  // subtle, non-interactive dot
   const m = L.circleMarker([+lat, +lon], {
-    radius: 6,
-    color: '#991b1b',
-    weight: 3,
-    fillColor: '#ef4444',
-    fillOpacity: 0.95,
-    interactive: false,        // <- disables hover/click & tooltips
+    radius: 5, color: '#991b1b', weight: 2, fillColor: '#ef4444', fillOpacity: 0.9,
+    interactive: false,
   })
   criticalLayer.addLayer(m)
 
@@ -285,21 +295,16 @@ function drawCritical(p: CriticalSegmentsNearFloodResponse) {
   const bounds = L.latLngBounds([])
 
   const fp = (p as any).flood_point
-    if (fp?.type === 'Point' && Array.isArray(fp.coordinates) && fp.coordinates.length === 2) {
+  if (fp?.type === 'Point' && Array.isArray(fp.coordinates) && fp.coordinates.length === 2) {
     const [lon, lat] = fp.coordinates
     const m = L.circleMarker([lat, lon], {
-        radius: 6,
-        color: '#991b1b',
-        weight: 3,
-        fillColor: '#ef4444',
-        fillOpacity: 0.95,
-        interactive: false,        // <- disables hover/click & tooltips
+      radius: 5, color: '#991b1b', weight: 2, fillColor: '#ef4444', fillOpacity: 0.9,
+      interactive: false,
     })
     criticalLayer.addLayer(m)
     bounds.extend([lat, lon])
-    }
+  }
 
-  // critical segments (EPSG:3414 → WGS84)
   for (const seg of (p as any).critical_segments || []) {
     const coords: [number, number][] = seg?.geometry?.coordinates || []
     const latlngs: [number, number][] = []
@@ -311,9 +316,7 @@ function drawCritical(p: CriticalSegmentsNearFloodResponse) {
     if (!latlngs.length) continue
 
     const safeName =
-      (typeof seg.road_name === 'string' && seg.road_name.trim())
-        ? seg.road_name
-        : 'Unnamed Road'
+      (typeof seg.road_name === 'string' && seg.road_name.trim()) ? seg.road_name : 'Unnamed Road'
 
     const poly = L.polyline(latlngs, {
       color: '#dc2626', weight: 6, opacity: 0.95, dashArray: '4,6',
@@ -358,7 +361,7 @@ function highlightSegmentAt(idx: number) {
 }
 
 // re-render markers when list changes
-watch([filteredEvents], () => { renderFloodMarkers() })
+watch([filteredEvents, selectedFloodId], () => { renderFloodMarkers() })
 
 // debounce refetch on buffer change (if a flood already selected)
 let bufTimer: number | undefined
@@ -390,6 +393,7 @@ onMounted(async () => {
   if (Number.isFinite(buf) && buf >= 1) bufferM.value = buf
   if (Number.isFinite(fid) && fid > 0) {
     selectedFloodId.value = fid
+    renderFloodMarkers()
     fetchAndDrawCritical(fid)
   }
 })
@@ -508,12 +512,9 @@ onMounted(async () => {
 .flood-tt .tt-table { width:100%; border-collapse:collapse; margin-top:4px; }
 .flood-tt .tt-table th, .flood-tt .tt-table td { border:1px solid #e5e7eb; padding:4px 6px; vertical-align:top; font-size:12px; }
 .flood-tt .tt-table th { width:48%; background:#f9fafb; color:#374151; font-weight:600; }
-.flood-marker path {
-  filter: drop-shadow(0 0 6px rgba(59,130,246,0.45));
-  animation: pulse-blue 2.1s ease-in-out infinite;
-}
-@keyframes pulse-blue {
-  0%, 100% { transform: scale(1);   opacity: 1; }
-  50%      { transform: scale(1.08); opacity: 0.85; }
+
+/* Optional glow for pins */
+.leaflet-marker-icon.flood-pin {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
 }
 </style>
