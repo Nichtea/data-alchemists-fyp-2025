@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onActivated, onUnmounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useAppStore } from '@/store/app'
 import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
 import ControlsPanel from '@/components/ControlsPanel.vue'
@@ -10,6 +11,15 @@ import { getBusesAffectedByFloods } from '@/api/api'
 
 useUrlStateSync()
 const store = useAppStore()
+
+/* === reset the chart-driving state when (re)entering the page === */
+function resetChart() {
+  ;(store as any).serviceRouteOverlay = null
+}
+onMounted(resetChart)     // first time this page is mounted
+onActivated(resetChart)   // when using <KeepAlive>, page re-activates
+onBeforeRouteLeave(resetChart) // optional: tidy up on exit
+onUnmounted(resetChart)   // optional: in case it fully unmounts
 
 /* ================= Chart ================= */
 const chartEntry = computed(() => {

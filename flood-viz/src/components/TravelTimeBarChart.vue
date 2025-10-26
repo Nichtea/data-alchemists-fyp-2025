@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   baseColor?: string
   delayColor?: string
   trackColor?: string
+  /** 'absolute' uses 0..max (+headroom). 'zoomed' uses min..max (+padding). */
+  scaleMode?: 'absolute' | 'zoomed'
 }>(), {
   title: 'Travel time scenarios',
   barHeight: 26,
@@ -25,33 +27,73 @@ const props = withDefaults(defineProps<{
   labelWidth: 160,
   rightPad: 12,
   valueColWidth: 96,
-  baseColor: '#e5e7eb',   // grey for base time
-  delayColor: '#fecaca',  // red for additional delay
+  baseColor: '#e5e7eb',
+  delayColor: '#fecaca',
   trackColor: '#f3f4f6',
+  scaleMode: 'absolute',
 })
 
-/* ---------- series with base+delay ---------- */
-function minutesTotal(entry: any, floodedBusDur_s: number) {
-  const baselineBus = entry?.floodSummary?.baseline_s ?? 0
-  return Math.max(0, Math.round((entry?.duration_s + (floodedBusDur_s - baselineBus)) / 60))
+/* ---------- build series (base + delay) ---------- */
+function minutesTotal(entry: any, floodedDur_s: number) {
+  const baseline = entry?.floodSummary?.baseline_s ?? 0
+  return Math.max(0, Math.round((entry?.duration_s + (floodedDur_s - baseline)) / 60))
 }
 const series = computed(() => {
   const e = props.entry
   if (!e) return []
-  const baseMin = Math.round(e.duration_s / 60) // total non-flooded itinerary minutes
-  const out: Array<{
-    label: string; baseMin: number; totalMin: number; deltaMin: number; flooded: boolean
-  }> = [{ label: 'Non-flooded', baseMin, totalMin: baseMin, deltaMin: 0, flooded: false }]
-
-  const baselineBus = e.floodSummary?.baseline_s ?? 0
+  const baseMin = Math.round(e.duration_s / 60)
+  const out: Array<{ label: string; baseMin: number; totalMin: number; deltaMin: number }> = [
+    { label: 'Non-flooded', baseMin, totalMin: baseMin, deltaMin: 0 },
+  ]
+  const baseline = e.floodSummary?.baseline_s ?? 0
   for (const sc of (e.floodSummary?.scenarios ?? [])) {
     const tot = minutesTotal(e, sc.duration_s)
-    const delta = Math.max(0, Math.round((sc.duration_s - baselineBus) / 60))
-    out.push({ label: sc.scenario, baseMin, totalMin: tot, deltaMin: delta, flooded: true })
+    const delta = Math.max(0, Math.round((sc.duration_s - baseline) / 60))
+    out.push({ label: sc.scenario, baseMin, totalMin: tot, deltaMin: delta })
   }
   return out
 })
-const maxMin = computed(() => Math.max(...series.value.map(s => s.totalMin), 1))
+
+/* ---------- scale helpers ---------- */
+function niceCeil(n: number, stepCandidates = [5, 10, 20, 25, 50]): number {
+  // choose a "nice" upper bound
+  if (n <= 0) return 1
+  const order = Math.pow(10, Math.floor(Math.log10(n)))
+  for (const s of stepCandidates) {
+    const bound = Math.ceil(n / (s * (order / 10))) * (s * (order / 10))
+    if (bound >= n) return bound
+  }
+  return Math.ceil(n)
+}
+
+const minVal = computed(() => {
+  if (!series.value.length) return 0
+  const mins = series.value.map(s => s.totalMin)
+  return Math.min(...mins)
+})
+const maxVal = computed(() => {
+  if (!series.value.length) return 1
+  const mins = series.value.map(s => s.totalMin)
+  return Math.max(...mins)
+})
+
+/** chart domain (minutes) */
+const domain = computed(() => {
+  if (!series.value.length) return { min: 0, max: 1 }
+
+  if (props.scaleMode === 'zoomed') {
+    // zoomed: focus on the visible range with ~10% padding
+    const span = Math.max(1, maxVal.value - minVal.value)
+    const pad = Math.max(0.5, span * 0.1)
+    const min = Math.max(0, minVal.value - pad)
+    const max = min + span + 2 * pad
+    return { min, max: niceCeil(max) }
+  }
+
+  // absolute: start at 0 with ~15% headroom
+  const maxWithHeadroom = maxVal.value * 1.15
+  return { min: 0, max: niceCeil(maxWithHeadroom) }
+})
 
 /* ---------- responsive width ---------- */
 const wrapEl = ref<HTMLDivElement | null>(null)
@@ -59,7 +101,8 @@ const containerW = ref(640)
 let ro: ResizeObserver | null = null
 onMounted(() => {
   if (!wrapEl.value) return
-  const measure = () => (containerW.value = Math.max(360, Math.round(wrapEl.value!.getBoundingClientRect().width)))
+  const measure = () =>
+    (containerW.value = Math.max(360, Math.round(wrapEl.value!.getBoundingClientRect().width)))
   ro = new ResizeObserver(measure); ro.observe(wrapEl.value); measure()
 })
 onBeforeUnmount(() => ro?.disconnect())
@@ -72,12 +115,24 @@ const svgHeight = computed(
   () => series.value.length * props.barHeight + (series.value.length - 1) * props.barGap + 24
 )
 
+/* ---------- ticks ---------- */
 const ticks = computed(() => {
-  const step = maxMin.value > 80 ? 20 : maxMin.value > 40 ? 10 : 5
-  const end = Math.ceil(maxMin.value / step) * step
-  const arr: number[] = []; for (let v = 0; v <= end; v += step) arr.push(v)
-  return { step, end, arr }
+  const span = Math.max(1, domain.value.max - domain.value.min)
+  const rough = span <= 20 ? 5 : span <= 60 ? 10 : 20
+  const end = niceCeil(domain.value.max)
+  const start = domain.value.min
+  const arr: number[] = []
+  for (let v = Math.ceil(start / rough) * rough; v <= end; v += rough) arr.push(v)
+  return { step: rough, start, end, arr }
 })
+
+/* ---------- x-position helpers ---------- */
+const xFromMin = (m: number) => {
+  const { min, max } = domain.value
+  const span = Math.max(1e-6, max - min)
+  const ratio = (m - min) / span
+  return Math.max(0, Math.min(1, ratio)) * plotWidth.value
+}
 </script>
 
 <template>
@@ -91,6 +146,9 @@ const ticks = computed(() => {
         <span class="inline-flex items-center gap-1">
           <span class="inline-block h-2 w-6 rounded" :style="{background: delayColor}"></span> Additional delay
         </span>
+        <span class="text-gray-500">
+          · Scale: <strong>{{ scaleMode === 'zoomed' ? 'Zoomed' : 'Absolute' }}</strong>
+        </span>
       </div>
     </div>
 
@@ -98,12 +156,16 @@ const ticks = computed(() => {
       <!-- grid -->
       <g :transform="`translate(${plotLeft}, 14)`">
         <g v-for="v in ticks.arr" :key="'g'+v">
-          <line :x1="(v / ticks.end) * plotWidth" y1="0"
-                :x2="(v / ticks.end) * plotWidth" :y2="svgHeight - 24"
+          <line :x1="xFromMin(v)" y1="0"
+                :x2="xFromMin(v)" :y2="svgHeight - 24"
                 :stroke="trackColor" stroke-width="1" />
-          <text :x="(v / ticks.end) * plotWidth" y="-4" text-anchor="middle"
+          <text :x="xFromMin(v)" y="-4" text-anchor="middle"
                 class="fill-gray-500 text-[11px]">{{ v }}</text>
         </g>
+        <!-- origin tick if zoomed (shows left baseline) -->
+        <text v-if="scaleMode==='zoomed'"
+              :x="xFromMin(domain.min)" y="-4" text-anchor="start"
+              class="fill-gray-400 text-[10px]">min {{ Math.round(domain.min) }}</text>
       </g>
 
       <!-- bars -->
@@ -117,16 +179,16 @@ const ticks = computed(() => {
               :width="plotWidth" :height="barHeight" rx="7" ry="7"
               :fill="trackColor" />
 
-        <!-- base segment -->
+        <!-- base segment (PROPORTIONAL: no min-width clamp) -->
         <rect :x="plotLeft" :y="24 + i * (barHeight + barGap)"
-              :width="Math.max(10, Math.round((s.baseMin / maxMin) * plotWidth))"
+              :width="xFromMin(s.baseMin)"
               :height="barHeight" rx="7" ry="7" :fill="baseColor" />
 
-        <!-- delay segment (only the extra part) -->
+        <!-- delay segment is only the extra part -->
         <rect v-if="s.deltaMin > 0"
-              :x="plotLeft + Math.round((s.baseMin / maxMin) * plotWidth)"
+              :x="plotLeft + xFromMin(s.baseMin)"
               :y="24 + i * (barHeight + barGap)"
-              :width="Math.max(2, Math.round((s.deltaMin / maxMin) * plotWidth))"
+              :width="xFromMin(s.deltaMin)"
               :height="barHeight" rx="7" ry="7" :fill="delayColor" />
 
         <!-- values -->
