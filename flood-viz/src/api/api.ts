@@ -26,6 +26,7 @@ const PATHS = {
   onemapRoute: '/onemap_car_route',            // GET ?start_address=&end_address=&date=&time=
   getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
   getBusesAffected: '/get_buses_affected_by_floods', // GET ?flood_id=
+  criticalSegmentsNearFlood: '/critical-segments',  // GET ?flood_id=&buffer_m=
 
   // bus data (your existing Flask routes)
   busStops: '/bus_stops',                                      // GET
@@ -215,6 +216,76 @@ export type OneMapPtItinerary = {
 export type OneMapPtResponse = {
   plan?: { itineraries?: OneMapPtItinerary[] }
   error?: string
+}
+
+// Critical Road Segments
+export type Svy21LineString = {
+  type: 'LineString'
+  // EPSG:3414 (SVY21) x/y pairs straight from backend
+  coordinates: [number, number][]
+}
+
+export type Wgs84Point = {
+  type: 'Point'
+  // [lon, lat] in WGS84 (backend already gives the flood_point in EPSG:4326 per your example)
+  coordinates: [number, number]
+}
+
+export type CriticalSegment = {
+  road_name: string
+  road_type: string
+  length_m: number
+  centrality_score: number
+  geometry: Svy21LineString
+}
+
+export type CriticalSegmentsNearFloodResponse = {
+  flood_id: number
+  buffer_m: number
+  flood_point: Wgs84Point
+  count_critical_segments: number
+  critical_segments: CriticalSegment[]
+}
+
+// --- 3) Fetcher (robust against NaN in backend JSON) ---
+export async function getCriticalSegmentsNearFlood(params: {
+  flood_id: number | string
+  buffer_m?: number | string // default 50 on backend; you can override
+}): Promise<CriticalSegmentsNearFloodResponse> {
+  const url = toURL(PATHS.criticalSegmentsNearFlood, {
+    flood_id: params.flood_id,
+    ...(params.buffer_m !== undefined ? { buffer_m: params.buffer_m } : {}),
+  })
+
+  const r = await fetch(url, { method: 'GET' })
+  const rawText = await r.text()
+  if (!r.ok) {
+    throw new Error(`GET ${PATHS.criticalSegmentsNearFlood} failed: ${r.status} ${rawText}`)
+  }
+
+  // Backend sometimes returns bare NaN tokens (invalid JSON). Sanitize to null.
+  // We do a generic replacement to be safe.
+  const sanitized = rawText.replace(/\bNaN\b/g, 'null')
+
+  let payload: CriticalSegmentsNearFloodResponse
+  try {
+    payload = JSON.parse(sanitized)
+  } catch (e) {
+    throw new Error(`Invalid JSON from critical-segments endpoint.`)
+  }
+
+  // Normalize road_name and any other nullable fields you care about
+  if (Array.isArray(payload?.critical_segments)) {
+    payload.critical_segments = payload.critical_segments.map((seg: any) => ({
+      ...seg,
+      road_name:
+        typeof seg?.road_name === 'string' && seg.road_name.trim()
+          ? seg.road_name
+          : 'Unnamed Road',
+    }))
+  }
+
+  return payload
 }
 
 // ---------- traffic & analytics ----------

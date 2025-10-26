@@ -203,7 +203,6 @@ function ensureMap() {
   }).addTo(map)
 }
 
-
 /* Clearers */
 function clearStopsOverlays() {
   if (stopsLayer) { map.removeLayer(stopsLayer); stopsLayer = null }

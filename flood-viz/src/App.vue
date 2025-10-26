@@ -9,6 +9,7 @@ const navItems = [
   { name: 'Public Transport', path: '/PublicTransport' },
   { name: 'Private Transport', path: '/PrivateTransport' },
   { name: 'Flood', path: '/Flood' },
+  { name: 'Critical Roads', path: '/CriticalRoad'},
 ]
 
 const isActive = (path: string) => computed(() => route.path === path)

@@ -6,6 +6,7 @@ const routes = [
   { path: '/publictransport', name: 'publictransport', component: () => import('@/pages/PublicTransport.vue') },
   { path: '/privatetransport', name: 'privatetransport', component: () => import('@/pages/PrivateTransport.vue') },
   { path: '/flood', name: 'flood', component: () => import('@/pages/Flood.vue') },
+  { path: '/criticalroad', name: 'criticalroad', component: () => import('@/pages/CriticalRoad.vue') },
 ]
 
 export const router = createRouter({
