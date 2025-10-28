@@ -47,8 +47,8 @@ const loadingLocations = ref(true)
 const loadingEvents    = ref(true)
 
 /* ─────────── Date filter (Locations tab ONLY) ─────────── */
-const startDate = ref<string>('')
-const endDate   = ref<string>('')
+const startDate = ref<string>('')  // YYYY-MM-DD
+const endDate   = ref<string>('')  // YYYY-MM-DD
 const filteringByDate = ref(false)
 
 const lastAppliedRange = computed(() =>
@@ -57,23 +57,33 @@ const lastAppliedRange = computed(() =>
     : ''
 )
 
+/* ─────────── Segmented tabs helpers ─────────── */
+const tabs = [
+  { key: 'locations' as Tab, label: 'Locations' },
+  { key: 'critical'  as Tab, label: 'Critical Roads' },
+]
+function tabBtnClass(t: Tab) {
+  const active = activeTab.value === t
+  return [
+    'flex-1 px-4 py-2 text-sm rounded-lg transition',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+    active ? 'bg-blue-600 text-white font-semibold shadow'
+           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+  ].join(' ')
+}
+function setTab(t: Tab) { if (activeTab.value !== t) activeTab.value = t }
+
 function isValidDateStr(s: string) { return /^\d{4}-\d{2}-\d{2}$/.test(s) }
 
 function buildLocationCounts(events: any[]): FloodRow[] {
   const byLoc = new Map<string, FloodRow>()
   for (const e of events) {
-    const name =
-      e.flooded_location ?? e.name ?? e.location ?? e.site ?? e.place ?? ''
+    const name = e.flooded_location ?? e.name ?? e.location ?? e.site ?? e.place ?? ''
     if (!name) continue
     const cur = byLoc.get(name) || { location: String(name), count: 0, time_travel_delay_min: undefined }
     cur.count += 1
-    // Try several possible delay fields from event payloads
-    const d = Number(
-      e.time_travel_delay_min ?? e.delay_min ?? e.delay ?? e.travel_delay_min
-    )
-    if (Number.isFinite(d)) {
-      cur.time_travel_delay_min = Math.max(cur.time_travel_delay_min ?? -Infinity, d)
-    }
+    const d = Number(e.time_travel_delay_min ?? e.delay_min ?? e.delay ?? e.travel_delay_min)
+    if (Number.isFinite(d)) cur.time_travel_delay_min = Math.max(cur.time_travel_delay_min ?? -Infinity, d)
     byLoc.set(name, cur)
   }
   return [...byLoc.values()]
@@ -91,8 +101,7 @@ async function applyDateFilter() {
       start_date: startDate.value, end_date: endDate.value
     }) as any[]
     eventsLocations.value = Array.isArray(rangeEvents) ? rangeEvents : []
-    // For filtered mode we derive the aggregation from events (may lack delay → show "—" gracefully)
-    floodLocations.value = buildLocationCounts(eventsLocations.value)
+    floodLocations.value = buildLocationCounts(eventsLocations.value) // derived from filtered events (delay may be missing → '—')
     if (activeTab.value === 'locations') rerenderMarkersForActiveTab()
     clearSegments(); clearCritical()
   } catch (e) {
@@ -107,9 +116,8 @@ async function clearDateFilter() {
   filteringByDate.value = false
   loadingLocations.value = true
   try {
-    // Restore Locations dataset and aggregation to the master (which contains delays)
     eventsLocations.value = eventsMaster.value.slice()
-    floodLocations.value  = locationsMasterAgg.value.slice()
+    floodLocations.value  = locationsMasterAgg.value.slice() // restore delays
     if (activeTab.value === 'locations') rerenderMarkersForActiveTab()
     clearSegments(); clearCritical()
   } finally {
@@ -269,15 +277,6 @@ function baseMarkerForEvent(e: any, isSelected: boolean) {
   return { marker, lat, lon, name, id }
 }
 
-/* Helper: normalize strings for matching between sources */
-function norm(s: any) {
-  return String(s ?? '').trim().toLowerCase()
-}
-
-/* Choose dataset by tab:
-   - Locations: eventsLocations
-   - Critical : eventsMaster (and filtered by qEvents)
-*/
 function rerenderMarkersForActiveTab() {
   if (!map) return
   if (markersLayer) { map.removeLayer(markersLayer); markersLayer = null }
@@ -315,15 +314,10 @@ async function focusLocation(name: string) {
   clearSegments(); clearCritical()
   segmentLayer = L.layerGroup().addTo(map)
 
-  // Use the correct event set (filtered vs full)
   const pool = filteringByDate.value ? eventsLocations.value : eventsMaster.value
-
-  // Robust match across several likely fields
-  const targetKey = norm(name)
-  const evts = pool.filter(e => {
-    return [e.flooded_location, e.name, e.location, e.site, e.place]
-      .some(v => norm(v) === targetKey)
-  })
+  const key = String(name ?? '').trim().toLowerCase()
+  const evts = pool.filter(e => [e.flooded_location, e.name, e.location, e.site, e.place]
+    .some(v => String(v ?? '').trim().toLowerCase() === key))
 
   if (!evts.length) return
 
@@ -337,7 +331,7 @@ async function focusLocation(name: string) {
       const detail = id != null ? await getDetailCached(Number(id)) : e
       if (myEpoch !== drawEpoch) return
       drawDetailGeometry(detail, style, bounds)
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   if (bounds.isValid()) {
@@ -352,7 +346,7 @@ async function focusLocation(name: string) {
   }
 }
 
-/* ─────────── Draw helpers ─────────── */
+/* Draw helpers */
 function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatLngBounds) {
   if (typeof detail?.geometry === 'string' && detail.geometry.trim()) {
     const groups = wktToLatLngs(detail.geometry)
@@ -373,7 +367,7 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
   }
 }
 
-/* ─────────── Critical segments (unchanged logic; minor tweaks) ─────────── */
+/* ─────────── Critical segments ─────────── */
 function onSelectFloodRow(e: any) {
   const id = Number(e?.flood_id ?? e?.id ?? e?.flood_event_id ?? e?.event_id)
   if (!Number.isFinite(id) || id <= 0) { errorMsg.value = 'Invalid flood id.'; return }
@@ -481,14 +475,8 @@ onMounted(async () => {
       getAllFloodEvents().catch(() => []),
       getFloodLocations().catch(() => []),
     ])
-
-    // Master events (Critical tab dataset)
     eventsMaster.value = Array.isArray(events) ? events : []
-
-    // Locations tab starts with full master events …
     eventsLocations.value = eventsMaster.value.slice()
-
-    // … but list/aggregation comes from the locations API (has delay)
     locationsMasterAgg.value = (Array.isArray(locations) ? locations : []).map((r: any) => ({
       location: String(r.location),
       count: Number(r.count) || 0,
@@ -520,16 +508,19 @@ onMounted(async () => {
   <div class="h-full grid grid-cols-12 gap-4 p-4">
     <!-- LEFT: tabbed sidebar -->
     <aside class="col-span-4 space-y-3">
-      <div class="bg-white rounded shadow">
-        <div class="flex">
+      <!-- Segmented (pill) tabs -->
+      <div class="bg-gray-200 rounded-xl p-1">
+        <div role="tablist" class="flex gap-2">
           <button
-            class="flex-1 px-4 py-2 text-sm font-medium border-b"
-            :class="activeTab==='locations' ? 'text-blue-700 border-blue-600' : 'text-gray-600 border-transparent'"
-            @click="activeTab='locations'">Locations</button>
-          <button
-            class="flex-1 px-4 py-2 text-sm font-medium border-b"
-            :class="activeTab==='critical' ? 'text-blue-700 border-blue-600' : 'text-gray-600 border-transparent'"
-            @click="activeTab='critical'">Critical Roads</button>
+            v-for="t in tabs"
+            :key="t.key"
+            role="tab"
+            :aria-selected="activeTab===t.key"
+            :class="tabBtnClass(t.key)"
+            @click="setTab(t.key)"
+          >
+            {{ t.label }}
+          </button>
         </div>
       </div>
 
