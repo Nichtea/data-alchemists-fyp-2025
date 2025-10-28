@@ -785,14 +785,27 @@ onMounted(async () => {
       <!-- Starts At -->
       <label class="block relative">
         <div class="text-xs text-gray-600 mb-1">Starts At</div>
-        <input v-model="originText" type="text" placeholder="Type stop name/code or an address"
+        <input
+          v-model="originText"
+          type="text"
+          placeholder="Type stop name/code or an address"
           class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          @keydown="onKeyNav($event, 'origin')" @focus="originHover = 0" autocomplete="off"/>
-        <div v-if="loaded && originText && originSuggests.length" class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow">
+          @keydown="onKeyNav($event, 'origin')"
+          @focus="originHover = 0"
+          autocomplete="off"
+        />
+        <div
+          v-if="loaded && originText && originSuggests.length"
+          class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow"
+        >
           <ul class="max-h-64 overflow-auto text-sm">
-            <li v-for="(s,i) in originSuggests" :key="'o-' + s.code"
-                :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===originHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
-                @mouseenter="originHover = i" @mousedown.prevent="selectStopFor('origin', s)">
+            <li
+              v-for="(s,i) in originSuggests"
+              :key="'o-' + s.code"
+              :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===originHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
+              @mouseenter="originHover = i"
+              @mousedown.prevent="selectStopFor('origin', s)"
+            >
               <span class="truncate">{{ s.name }}</span>
               <span class="text-xs text-gray-500 ml-2 shrink-0">{{ s.code }}</span>
             </li>
@@ -803,14 +816,27 @@ onMounted(async () => {
       <!-- Ends At -->
       <label class="block relative mt-2">
         <div class="text-xs text-gray-600 mb-1">Ends At</div>
-        <input v-model="destText" type="text" placeholder="Type stop name/code or an address"
+        <input
+          v-model="destText"
+          type="text"
+          placeholder="Type stop name/code or an address"
           class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          @keydown="onKeyNav($event, 'dest')" @focus="destHover = 0" autocomplete="off"/>
-        <div v-if="loaded && destText && destSuggests.length" class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow">
+          @keydown="onKeyNav($event, 'dest')"
+          @focus="destHover = 0"
+          autocomplete="off"
+        />
+        <div
+          v-if="loaded && destText && destSuggests.length"
+          class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow"
+        >
           <ul class="max-h-64 overflow-auto text-sm">
-            <li v-for="(s,i) in destSuggests" :key="'d-' + s.code"
-                :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===destHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
-                @mouseenter="destHover = i" @mousedown.prevent="selectStopFor('dest', s)">
+            <li
+              v-for="(s,i) in destSuggests"
+              :key="'d-' + s.code"
+              :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===destHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
+              @mouseenter="destHover = i"
+              @mousedown.prevent="selectStopFor('dest', s)"
+            >
               <span class="truncate">{{ s.name }}</span>
               <span class="text-xs text-gray-500 ml-2 shrink-0">{{ s.code }}</span>
             </li>
@@ -819,34 +845,43 @@ onMounted(async () => {
       </label>
 
       <div class="flex items-center gap-2 flex-wrap">
-          <button class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
-                  @click="queryBestBusRoute" title="Find best bus route between selected stops">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
-            </svg>
-            Find best bus route
-          </button>
+        <button
+          class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
+          @click="queryBestBusRoute"
+          title="Find best bus route between selected stops"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
+          </svg>
+          Find best bus route
+        </button>
 
-          <button class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
-                  @click="queryPtRouteViaOneMap" :disabled="ptLoading" title="Public transport via OneMap (type addresses above)">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
-            </svg>
-            {{ ptLoading ? 'Routing…' : 'Find best bus itinerary' }}
-          </button>
+        <button
+          class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
+          @click="queryPtRouteViaOneMap"
+          :disabled="ptLoading"
+          title="Public transport via OneMap (type addresses above)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+          </svg>
+          {{ ptLoading ? 'Routing…' : 'Find best bus itinerary' }}
+        </button>
 
-          <!-- 🧹 New button here -->
-          <button class="inline-flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                  @click="clearMapRoutes" title="Clear all drawn routes and map markers">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-            Clear Map & Routes
-          </button>
+        <!-- Clear all -->
+        <button
+          class="inline-flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          @click="clearMapRoutes"
+          title="Clear all drawn routes and map markers"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+          Clear Map & Routes
+        </button>
 
-          <span v-if="ptError" class="text-xs text-rose-600">{{ ptError }}</span>
-        </div>
-
+        <span v-if="ptError" class="text-xs text-rose-600">{{ ptError }}</span>
+      </div>
     </div>
 
     <!-- ====== Itinerary list ====== -->
@@ -854,8 +889,11 @@ onMounted(async () => {
       <div class="text-sm font-semibold mb-2">Itineraries ({{ ptItins.length }})</div>
 
       <div class="space-y-3">
-        <div v-for="(it, idx) in ptItins" :key="'it-' + idx"
-             :class="['rounded-xl border p-3 shadow-sm', selectedItinIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200']">
+        <div
+          v-for="(it, idx) in ptItins"
+          :key="'it-' + idx"
+          :class="['rounded-xl border p-3 shadow-sm', selectedItinIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200']"
+        >
           <div class="flex items-center gap-3">
             <div class="text-base font-semibold">Option {{ idx + 1 }}</div>
             <div class="text-sm text-gray-700">
@@ -864,10 +902,12 @@ onMounted(async () => {
               {{ it.transfers }} transfer{{ it.transfers === 1 ? '' : 's' }}
             </div>
             <div class="ml-auto">
-              <button class="rounded-md border px-2 py-1 text-xs"
-                      :class="selectedItinIdx === idx ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 hover:bg-gray-50'"
-                      @click="selectedItinIdx = idx; applyItineraryToMap(idx)"
-                      title="Show this itinerary on the map">
+              <button
+                class="rounded-md border px-2 py-1 text-xs"
+                :class="selectedItinIdx === idx ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 hover:bg-gray-50'"
+                @click="selectedItinIdx = idx; applyItineraryToMap(idx)"
+                title="Show this itinerary on the map"
+              >
                 {{ selectedItinIdx === idx ? 'Shown on map' : 'Show on map' }}
               </button>
             </div>
@@ -878,11 +918,17 @@ onMounted(async () => {
             <summary class="cursor-pointer select-none text-sm text-gray-700">Stops & segments</summary>
 
             <div class="space-y-4 mt-2">
-              <div v-for="(L, li) in it.legs.filter(x => x.mode==='BUS')" :key="'legstops-'+li"
-                   class="rounded-md border p-2" :style="{ borderColor: legStatus(L)==='flooded' ? '#fecaca' : '#bfdbfe' }">
+              <div
+                v-for="(L, li) in it.legs.filter(x => x.mode==='BUS')"
+                :key="'legstops-'+li"
+                class="rounded-md border p-2"
+                :style="{ borderColor: legStatus(L)==='flooded' ? '#fecaca' : '#bfdbfe' }"
+              >
                 <div class="flex items-center gap-2 text-sm mb-2">
-                  <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1"
-                        :style="{ backgroundColor: legChipStyle(L).bg, color: legChipStyle(L).text, boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset` }">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1"
+                    :style="{ backgroundColor: legChipStyle(L).bg, color: legChipStyle(L).text, boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset` }"
+                  >
                     Bus {{ routeLabel(L) }}
                   </span>
                   <span class="text-xs" :class="legStatus(L)==='flooded' ? 'text-rose-600' : 'text-blue-600'">
@@ -891,9 +937,15 @@ onMounted(async () => {
                 </div>
 
                 <ol class="space-y-1">
-                  <li v-for="(code, si) in legStops(L)" :key="code + '-' + si" class="flex items-center gap-2 text-sm">
-                    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full text-white text-[11px]"
-                          :style="{ backgroundColor: legStatus(L)==='flooded' ? '#dc2626' : '#2563eb' }">
+                  <li
+                    v-for="(code, si) in legStops(L)"
+                    :key="code + '-' + si"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <span
+                      class="inline-flex h-5 w-5 items-center justify-center rounded-full text-white text-[11px]"
+                      :style="{ backgroundColor: legStatus(L)==='flooded' ? '#dc2626' : '#2563eb' }"
+                    >
                       {{ si + 1 }}
                     </span>
                     <span class="truncate">{{ stopIndexByCode[code]?.name || 'Stop' }}</span>
@@ -939,22 +991,21 @@ onMounted(async () => {
       <div v-else-if="arrivals && arrivals.length" class="mt-3">
         <div v-if="(store as any).serviceRouteOverlay" class="mt-4">
           <div class="rounded-xl border border-gray-200 bg-white/80 backdrop-blur shadow-sm p-4">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10">
-                  Selected route
-                </span>
-                <div class="text-base font-semibold">
-                  {{ (store as any).serviceRouteOverlay.serviceNo }}
-                </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10">
+                Selected route
+              </span>
+              <div class="text-base font-semibold">
+                {{ (store as any).serviceRouteOverlay.serviceNo }}
               </div>
-              <button class="rounded-md border px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                      @click="viewDirectionOnMap(d)">
-                Fit to route
-              </button>
             </div>
 
-            <div v-for="(d, i) in (store as any).serviceRouteOverlay.directions" :key="i" class="mt-3">
+            <!-- Each direction card -->
+            <div
+              v-for="(d, i) in (store as any).serviceRouteOverlay.directions"
+              :key="i"
+              class="mt-3"
+            >
               <div class="flex items-center gap-2 text-sm">
                 <div class="font-medium">Direction {{ d.dir }}</div>
                 <div class="text-gray-400">•</div>
@@ -973,34 +1024,49 @@ onMounted(async () => {
                 </div>
               </div>
 
+              <!-- Action buttons for this direction -->
+              <div class="mt-2 flex items-center gap-2">
+                <button
+                  class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                  @click="viewDirectionOnMap(d)"
+                >
+                  Fit to route
+                </button>
+                <button
+                  class="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  @click="copyItinerary(d)"
+                >
+                  Copy itinerary
+                </button>
+              </div>
+
               <details class="mt-2 rounded-md bg-gray-50 p-3 open:bg-gray-100">
                 <summary class="cursor-pointer select-none text-sm text-gray-700">Show stops</summary>
                 <ol class="mt-2 space-y-1">
-                  <li v-for="(code, idx) in (d.stopCodes || [])" :key="code" class="flex items-center gap-2 text-sm">
-                    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[11px]">{{ idx + 1 }}</span>
+                  <li
+                    v-for="(code, idx) in (d.stopCodes || [])"
+                    :key="code"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[11px]">
+                      {{ idx + 1 }}
+                    </span>
                     <span class="truncate">{{ stopIndexByCode[code]?.name || 'Stop' }}</span>
                     <span class="text-xs text-gray-500">({{ code }})</span>
                   </li>
                 </ol>
               </details>
-
-              <div class="mt-3 flex items-center gap-2">
-                <button class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-                        @click="viewDirectionOnMap(d)">
-                  View on map
-                </button>
-                <button class="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100"
-                        @click="copyItinerary(d)">
-                  Copy itinerary
-                </button>
-              </div>
             </div>
           </div>
         </div>
 
         <div class="text-sm font-medium mb-2">Live arrivals</div>
         <div class="space-y-2">
-          <div v-for="svc in arrivals" :key="svc.no" class="border rounded-md p-2 flex items-center justify-between">
+          <div
+            v-for="svc in arrivals"
+            :key="svc.no"
+            class="border rounded-md p-2 flex items-center justify-between"
+          >
             <div class="flex items-center gap-3">
               <div class="text-base font-semibold tabular-nums">{{ svc.no }}</div>
               <div class="text-xs text-gray-500">
@@ -1009,8 +1075,11 @@ onMounted(async () => {
                   ETA: {{ Math.round((svc.next?.duration_ms ?? 0) / 60000) }} min
                 </div>
               </div>
-              <button class="inline-flex items-center gap-1.5 rounded-md bg-yellow-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-yellow-700 active:bg-yellow-800 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 transition-colors"
-                      title="Show this service route on map" @click="drawServiceRoute(svc.no)">
+              <button
+                class="inline-flex items-center gap-1.5 rounded-md bg-yellow-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-yellow-700 active:bg-yellow-800 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 transition-colors"
+                title="Show this service route on map"
+                @click="drawServiceRoute(svc.no)"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
                 </svg>
@@ -1022,7 +1091,11 @@ onMounted(async () => {
               <span class="px-2 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600">
                 {{ (svc.next?.load || '-').toUpperCase() }}
               </span>
-              <span v-if="svc.next?.feature === 'WAB'" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]" title="Wheelchair Accessible">
+              <span
+                v-if="svc.next?.feature === 'WAB'"
+                class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]"
+                title="Wheelchair Accessible"
+              >
                 WAB
               </span>
               <span class="text-[11px] text-gray-500">
@@ -1053,3 +1126,4 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
