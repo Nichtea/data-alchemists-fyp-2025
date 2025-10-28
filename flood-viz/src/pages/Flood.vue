@@ -59,7 +59,7 @@ const lastAppliedRange = computed(() =>
 
 /* ─────────── Segmented tabs helpers ─────────── */
 const tabs = [
-  { key: 'locations' as Tab, label: 'Locations' },
+  { key: 'locations' as Tab, label: 'Flood Locations' },
   { key: 'critical'  as Tab, label: 'Critical Roads' },
 ]
 function tabBtnClass(t: Tab) {
