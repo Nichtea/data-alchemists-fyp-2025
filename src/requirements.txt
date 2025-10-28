@@ -3,3 +3,7 @@ flasgger
 python-dotenv
 supabase
 osmnx
+gunicorn
+googlemaps
+geopandas
+shapely
