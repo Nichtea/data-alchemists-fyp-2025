@@ -1,3 +1,4 @@
+from pathlib import Path
 from src.database import supabase
 from flask import jsonify, request, Blueprint
 import osmnx as ox
@@ -16,13 +17,13 @@ import pickle
 
 
 load_dotenv()
-
+ROOT_DIR = Path(__file__).resolve().parents[2]
 ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 LTA_BUS_ARRIVAL_URL = "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
 ONE_MAP_NEAREST_BUS_STOPS = "https://www.onemap.gov.sg/api/public/nearbysvc/getNearestBusStops"
 LTA_API_KEY = os.getenv("LTA_API_KEY")
-flood_events_df = pd.read_csv("flood_events_rows.csv")
-graph_path = "sg_bus_network.graphml"  
+flood_events_df = pd.read_csv(ROOT_DIR"flood_events_rows.csv")
+graph_path = ROOT_DIR / "SG_bus_network.graphml"
 G = ox.load_graphml(graph_path)
 
 stops_path = "stops.txt"

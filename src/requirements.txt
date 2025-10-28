@@ -5,3 +5,5 @@ supabase
 osmnx
 gunicorn
 googlemaps
+geopandas
+shapely
