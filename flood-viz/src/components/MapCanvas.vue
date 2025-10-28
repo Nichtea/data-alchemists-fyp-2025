@@ -616,25 +616,42 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
 
   if (!o) { clearColoredPolylines(); return }
 
+  // ---------- Case 1: pre-colored polylines (tuples already) ----------
   if (Array.isArray(o?.polylines) && o.polylines.length) {
     setColoredPolylines(o.polylines)
-    const first = o.polylines[0]?.path?.[0]
+
+    const first = o.polylines[0]?.path?.[0] as [number, number] | undefined
     const lastSeg = o.polylines[o.polylines.length - 1]
-    const last = lastSeg?.path?.[lastSeg.path.length - 1]
-    if (first && last) setRouteEndpoints({lat:first[0], lon:first[1]}, {lat:last[0], lon:last[1]})
+    const last = lastSeg?.path?.[lastSeg.path.length - 1] as [number, number] | undefined
+
+    if (first && last) {
+      setRouteEndpoints(
+        { lat: first[0], lon: first[1] },
+        { lat: last[0],  lon: last[1]  },
+      )
+    }
     return
   }
 
+  // ---------- Case 2: build from directions ----------
   const group = L.layerGroup()
   const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444']
-  let firstPoint: L.LatLng | null = null
-  let lastPoint: L.LatLng | null = null
+
+  // store endpoints as tuples to avoid L.LatLng narrowing issues
+  let firstPoint: [number, number] | null = null
+  let lastPoint: [number, number] | null = null
 
   o.directions.forEach((d: any, idx: number) => {
     const color = colors[idx % colors.length]
-    const latlngs = (d.roadPath ?? d.points).map((p: [number, number]) => L.latLng(p[0], p[1]))
-    if (!firstPoint && latlngs.length) firstPoint = latlngs[0]
-    if (latlngs.length) lastPoint = latlngs[latlngs.length - 1]
+
+    // Leaflet polylines want LatLngs, so we still create them for rendering…
+    const latlngs = (d.roadPath ?? d.points).map(
+      (p: [number, number]) => L.latLng(p[0], p[1])
+    )
+
+    // …but we capture endpoints as raw tuples [lat, lon]
+    if (!firstPoint && latlngs.length) firstPoint = [latlngs[0].lat, latlngs[0].lng]
+    if (latlngs.length)            lastPoint  = [latlngs[latlngs.length - 1].lat, latlngs[latlngs.length - 1].lng]
 
     if (Array.isArray(d.roadPath) && d.roadPath.length >= 2) {
       group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96 }))
@@ -647,8 +664,8 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
 
   if (firstPoint && lastPoint) {
     setRouteEndpoints(
-      { lat: firstPoint.lat, lon: firstPoint.lng },
-      { lat: lastPoint.lat,  lon: lastPoint.lng  },
+      { lat: firstPoint[0], lon: firstPoint[1] },
+      { lat: lastPoint[0],  lon: lastPoint[1]  },
     )
   }
 }, { deep: true })
