@@ -3,3 +3,5 @@ flasgger
 python-dotenv
 supabase
 osmnx
+gunicorn
+reqeuests
