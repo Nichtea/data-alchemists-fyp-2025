@@ -26,7 +26,10 @@ const PATHS = {
   onemapRoute: '/onemap_car_route',            // GET ?start_address=&end_address=&date=&time=
   getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
   getBusesAffected: '/get_buses_affected_by_floods', // GET ?flood_id=
+
+  //Critical Segments
   criticalSegmentsNearFlood: '/critical-segments',  // GET ?flood_id=&buffer_m=
+  uniqueFloodEventsLocation: '/unique-flood-events/location', 
 
   // bus data (your existing Flask routes)
   busStops: '/bus_stops',                                      // GET
@@ -160,6 +163,31 @@ function normalizeFloodLocationsResponse(raw: any): FloodLocationCount[] {
   }
 
   return [...byLoc.values()]
+}
+
+// ——— Unique flood events ———
+export type UniqueFloodEvent = {
+  flood_id: number
+  flooded_location: string
+  latitude: number
+  longitude: number
+  time_travel_delay_min: number
+}
+
+/** Raw fetch of unique flood events with delay from backend */
+export async function getUniqueFloodEventsByLocation(
+  opts?: { signal?: AbortSignal }
+): Promise<UniqueFloodEvent[]> {
+  const r = await fetch(toURL(PATHS.uniqueFloodEventsLocation), {
+    method: 'GET',
+    signal: opts?.signal,
+  })
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '')
+    throw new Error(`GET ${PATHS.uniqueFloodEventsLocation} failed: ${r.status} ${txt}`)
+  }
+  const data = await r.json()
+  return Array.isArray(data) ? (data as UniqueFloodEvent[]) : []
 }
 
 export async function getFloodLocations(): Promise<FloodLocationCount[]> {

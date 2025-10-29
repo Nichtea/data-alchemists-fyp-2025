@@ -8,7 +8,8 @@ import {
   getFloodLocations,
   getFloodEventsByDateRange,
   getCriticalSegmentsNearFlood,
-  type CriticalSegmentsNearFloodResponse
+  type CriticalSegmentsNearFloodResponse,
+  getUniqueFloodEventsByLocation,
 } from '@/api/api'
 
 type Tab = 'locations' | 'critical'
@@ -37,9 +38,10 @@ let highlighted: L.Polyline | null = null
 let drawEpoch = 0
 
 /* ─────────── Data ─────────── */
-const eventsMaster    = ref<any[]>([])  // all events (never filtered) — used by Critical tab
+const eventsMaster    = ref<any[]>([])  // all events (never filtered) — used by Locations & fallback
 const eventsLocations = ref<any[]>([])  // Locations tab working set (may be date-filtered)
 
+// Locations tab aggregation (unchanged)
 const locationsMasterAgg = ref<FloodRow[]>([]) // pristine aggregation from API (has delay)
 const floodLocations     = ref<FloodRow[]>([]) // current list shown in Locations tab
 
@@ -56,22 +58,6 @@ const lastAppliedRange = computed(() =>
     ? `${startDate.value} → ${endDate.value}`
     : ''
 )
-
-/* ─────────── Segmented tabs helpers ─────────── */
-const tabs = [
-  { key: 'locations' as Tab, label: 'Flood Locations' },
-  { key: 'critical'  as Tab, label: 'Critical Roads' },
-]
-function tabBtnClass(t: Tab) {
-  const active = activeTab.value === t
-  return [
-    'flex-1 px-4 py-2 text-sm rounded-lg transition',
-    'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-    active ? 'bg-blue-600 text-white font-semibold shadow'
-           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-  ].join(' ')
-}
-function setTab(t: Tab) { if (activeTab.value !== t) activeTab.value = t }
 
 function isValidDateStr(s: string) { return /^\d{4}-\d{2}-\d{2}$/.test(s) }
 
@@ -101,7 +87,7 @@ async function applyDateFilter() {
       start_date: startDate.value, end_date: endDate.value
     }) as any[]
     eventsLocations.value = Array.isArray(rangeEvents) ? rangeEvents : []
-    floodLocations.value = buildLocationCounts(eventsLocations.value) // derived from filtered events (delay may be missing → '—')
+    floodLocations.value = buildLocationCounts(eventsLocations.value) // derived (delay may be missing → '—')
     if (activeTab.value === 'locations') rerenderMarkersForActiveTab()
     clearSegments(); clearCritical()
   } catch (e) {
@@ -161,16 +147,53 @@ const infoMsg  = ref<string | null>(null)
 const selectedFloodId = ref<number | null>(null)
 const lastPayload = ref<CriticalSegmentsNearFloodResponse | null>(null)
 
-/* Flood list in Critical tab ALWAYS from eventsMaster */
-const qEvents = ref(''); const topEvents = ref(500)
+/* NEW: Unique events for Critical tab (from /unique-flood-events/location) */
+const uniqueEvents = ref<Array<{
+  flood_id: number
+  flooded_location: string
+  latitude?: number
+  longitude?: number
+  time_travel_delay_min?: number
+}>>([])
+
+/* NEW: Critical tab filters + sorting */
+const qEvents  = ref('')
+const topEvents = ref(500)
+const sortByCrit = ref<'delay' | 'name' | 'id'>('delay')
+const sortDirCrit = ref<'desc' | 'asc'>('desc')
+
+/* NEW: Critical tab listing (ID • Location • Delay) */
 const filteredEvents = computed(() => {
-  const query = qEvents.value.trim().toLowerCase()
-  const rows = eventsMaster.value
-  const filtered = query ? rows.filter(e => (e.flooded_location || e.name || '').toLowerCase().includes(query)) : rows
-  return filtered.slice(0, Math.max(1, Number(topEvents.value) || 0))
+  let rows = uniqueEvents.value
+
+  const qv = qEvents.value.trim().toLowerCase()
+  if (qv) {
+    rows = rows.filter(e =>
+      (e.flooded_location || '').toLowerCase().includes(qv) ||
+      String(e.flood_id).includes(qv)
+    )
+  }
+
+  rows = [...rows].sort((a, b) => {
+    if (sortByCrit.value === 'delay') {
+      const A = Number.isFinite(+a.time_travel_delay_min!) ? +a.time_travel_delay_min! : -Infinity
+      const B = Number.isFinite(+b.time_travel_delay_min!) ? +b.time_travel_delay_min! : -Infinity
+      return sortDirCrit.value === 'desc' ? B - A : A - B
+    }
+    if (sortByCrit.value === 'name') {
+      const A = (a.flooded_location || '').toLowerCase()
+      const B = (b.flooded_location || '').toLowerCase()
+      const cmp = A === B ? 0 : (A > B ? 1 : -1)
+      return sortDirCrit.value === 'desc' ? -cmp : cmp
+    }
+    // id
+    return sortDirCrit.value === 'desc' ? (b.flood_id - a.flood_id) : (a.flood_id - b.flood_id)
+  })
+
+  return rows.slice(0, Math.max(1, Number(topEvents.value) || 0))
 })
 
-/* ─────────── Detail cache ─────────── */
+/* ─────────── Tooltip / details cache ─────────── */
 const detailCache = new Map<number, any>()
 const detailPromise = new Map<number, Promise<any>>()
 async function getDetailCached(id: number) {
@@ -184,7 +207,6 @@ async function getDetailCached(id: number) {
   detailPromise.set(id, p); return p
 }
 
-/* ─────────── Tooltip helpers ─────────── */
 const fmt = {
   min: (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '—',
   km:  (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '—',
@@ -256,6 +278,7 @@ function makeFloodIcon(selected: boolean) {
     <circle cx="16" cy="14" r="5.2" fill="white"/></svg>`
   return L.divIcon({ className: 'flood-pin', html: svg, iconSize: [32, 40], iconAnchor: [16, 40], popupAnchor: [0, -36], tooltipAnchor: [0, -36] })
 }
+
 const groupByLocation = new Map<string, L.LayerGroup>()
 
 function baseMarkerForEvent(e: any, isSelected: boolean) {
@@ -281,28 +304,41 @@ function rerenderMarkersForActiveTab() {
   if (!map) return
   if (markersLayer) { map.removeLayer(markersLayer); markersLayer = null }
   markersLayer = L.layerGroup().addTo(map)
-  groupByLocation.clear()
   const bounds = L.latLngBounds([])
 
-  const usingLocations = activeTab.value === 'locations'
-  const data = usingLocations ? eventsLocations.value : eventsMaster.value
+  // Locations tab: unchanged (driven by filteredLocations)
+  if (activeTab.value === 'locations') {
+    groupByLocation.clear()
+    const data = eventsLocations.value
+    const nameSet = new Set<string>(filteredLocations.value.map(r => r.location))
 
-  const nameSet = new Set<string>(
-    usingLocations
-      ? filteredLocations.value.map(r => r.location)
-      : filteredEvents.value.map(e => (e.flooded_location || e.name || ''))
-  )
+    for (const e of data) {
+      const name: string = e.flooded_location || e.name || e.location || e.site || e.place || ''
+      if (!name || !nameSet.has(name)) continue
+      const id = Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id)
+      const isSelected = selectedFloodId.value === id
+      const built = baseMarkerForEvent(e, isSelected); if (!built) continue
+      const { marker, lat, lon } = built
+      markersLayer.addLayer(marker); bounds.extend([+lat, +lon])
+      if (!groupByLocation.has(name)) groupByLocation.set(name, L.layerGroup())
+      groupByLocation.get(name)!.addLayer(marker)
+    }
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.12))
+    return
+  }
 
-  for (const e of data) {
-    const name: string = e.flooded_location || e.name || e.location || e.site || e.place || ''
-    if (!name || !nameSet.has(name)) continue
-    const id = Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id)
-    const isSelected = selectedFloodId.value === id
-    const built = baseMarkerForEvent(e, isSelected); if (!built) continue
-    const { marker, lat, lon } = built
-    markersLayer.addLayer(marker); bounds.extend([+lat, +lon])
-    if (!groupByLocation.has(name)) groupByLocation.set(name, L.layerGroup())
-    groupByLocation.get(name)!.addLayer(marker)
+  // Critical tab: markers from the sorted/filtered unique list
+  for (const r of filteredEvents.value) {
+    const lat = r.latitude, lon = r.longitude
+    if (!Number.isFinite(+lat!) || !Number.isFinite(+lon!)) continue
+    const isSelected = selectedFloodId.value === r.flood_id
+    const marker = L.marker([+lat!, +lon!], { icon: makeFloodIcon(isSelected) })
+      .bindTooltip(
+        `<div class="flood-tt"><div class="tt-title">${r.flooded_location || 'Flood event'}</div><div class="tt-subtle">ID: ${r.flood_id}</div></div>`,
+        { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' }
+      )
+      .on('click', () => { onSelectFloodId(r.flood_id) })
+    markersLayer.addLayer(marker); bounds.extend([+lat!, +lon!])
   }
   if (bounds.isValid()) map.fitBounds(bounds.pad(0.12))
 }
@@ -370,11 +406,15 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
 /* ─────────── Critical segments ─────────── */
 function onSelectFloodRow(e: any) {
   const id = Number(e?.flood_id ?? e?.id ?? e?.flood_event_id ?? e?.event_id)
-  if (!Number.isFinite(id) || id <= 0) { errorMsg.value = 'Invalid flood id.'; return }
-  selectedFloodId.value = id
+  onSelectFloodId(id)
+}
+function onSelectFloodId(fid: number) {
+  if (!Number.isFinite(fid) || fid <= 0) { errorMsg.value = 'Invalid flood id.'; return }
+  selectedFloodId.value = fid
   lastPayload.value = null; infoMsg.value = null
+  activeTab.value = 'critical'
   rerenderMarkersForActiveTab()
-  fetchAndDrawCritical(id)
+  fetchAndDrawCritical(fid)
 }
 
 async function fetchAndDrawCritical(fid: number) {
@@ -396,12 +436,15 @@ async function fetchAndDrawCritical(fid: number) {
 
 function drawOnlyFloodPoint(fid: number) {
   clearCritical(); criticalLayer = L.layerGroup().addTo(map)
+  // Prefer coordinates from uniqueEvents (more consistent)
+  const evtU = uniqueEvents.value.find(e => Number(e.flood_id) === Number(fid))
+  const latU = evtU?.latitude, lonU = evtU?.longitude
   const evt = eventsMaster.value.find(e => Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id) === Number(fid))
-  const lat = evt?.latitude ?? evt?.lat ?? evt?.center_lat
-  const lon = evt?.longitude ?? evt?.lon ?? evt?.center_lon ?? evt?.lng
-  if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return
-  const m = L.circleMarker([+lat, +lon], { radius: 5, color: '#991b1b', weight: 2, fillColor: '#ef4444', fillOpacity: 0.9, interactive: false })
-  criticalLayer.addLayer(m); map.fitBounds(L.latLngBounds([[+lat, +lon]]).pad(0.25))
+  const lat = Number.isFinite(+latU!) ? latU : (evt?.latitude ?? evt?.lat ?? evt?.center_lat)
+  const lon = Number.isFinite(+lonU!) ? lonU : (evt?.longitude ?? evt?.lon ?? evt?.center_lon ?? evt?.lng)
+  if (!Number.isFinite(+lat!) || !Number.isFinite(+lon!)) return
+  const m = L.circleMarker([+lat!, +lon!], { radius: 5, color: '#991b1b', weight: 2, fillColor: '#ef4444', fillOpacity: 0.9, interactive: false })
+  criticalLayer.addLayer(m); map.fitBounds(L.latLngBounds([[+lat!, +lon!]]).pad(0.25))
 }
 
 function drawCritical(p: CriticalSegmentsNearFloodResponse) {
@@ -471,10 +514,12 @@ watch(activeTab, () => {
 onMounted(async () => {
   ensureMap()
   try {
-    const [events, locations] = await Promise.all([
-      getAllFloodEvents().catch(() => []),
-      getFloodLocations().catch(() => []),
+    const [events, locations, uniques] = await Promise.all([
+      getAllFloodEvents().catch(() => []),          // ← keeps Locations tab behaviour the same
+      getFloodLocations().catch(() => []),          // ← your existing aggregated counts
+      getUniqueFloodEventsByLocation().catch(() => []), // ← NEW for Critical tab list
     ])
+    // For Locations tab
     eventsMaster.value = Array.isArray(events) ? events : []
     eventsLocations.value = eventsMaster.value.slice()
     locationsMasterAgg.value = (Array.isArray(locations) ? locations : []).map((r: any) => ({
@@ -483,6 +528,15 @@ onMounted(async () => {
       time_travel_delay_min: Number(r.time_travel_delay_min),
     }))
     floodLocations.value = locationsMasterAgg.value.slice()
+
+    // For Critical tab
+    uniqueEvents.value = (Array.isArray(uniques) ? uniques : []).map((u: any) => ({
+      flood_id: Number(u.flood_id),
+      flooded_location: String(u.flooded_location ?? ''),
+      latitude: Number.isFinite(+u.latitude) ? +u.latitude : undefined,
+      longitude: Number.isFinite(+u.longitude) ? +u.longitude : undefined,
+      time_travel_delay_min: Number(u.time_travel_delay_min),
+    }))
   } finally {
     loadingLocations.value = false
     loadingEvents.value    = false
@@ -512,19 +566,24 @@ onMounted(async () => {
       <div class="bg-gray-200 rounded-xl p-1">
         <div role="tablist" class="flex gap-2">
           <button
-            v-for="t in tabs"
+            v-for="t in [{ key: 'locations', label: 'Flood Locations' }, { key: 'critical', label: 'Critical Roads' }]"
             :key="t.key"
             role="tab"
             :aria-selected="activeTab===t.key"
-            :class="tabBtnClass(t.key)"
-            @click="setTab(t.key)"
+            :class="[
+              'flex-1 px-4 py-2 text-sm rounded-lg transition',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+              activeTab===t.key ? 'bg-blue-600 text-white font-semibold shadow'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            ]"
+            @click="activeTab = t.key as any"
           >
             {{ t.label }}
           </button>
         </div>
       </div>
 
-      <!-- LOCATIONS TAB -->
+      <!-- LOCATIONS TAB (UNCHANGED BEHAVIOUR) -->
       <div v-if="activeTab==='locations'" class="space-y-4">
         <div class="bg-white rounded shadow p-2">
           <div class="text-sm font-semibold">Flood-Prone Locations</div>
@@ -615,18 +674,32 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- CRITICAL TAB -->
+      <!-- CRITICAL TAB (uses unique endpoint; sortable by Delay/Name/ID) -->
       <div v-else class="space-y-4">
         <div class="bg-white rounded shadow p-3 space-y-3">
           <div class="text-sm font-semibold">Critical Roads Near Flood</div>
           <div class="grid grid-cols-2 gap-2">
             <label class="text-xs text-gray-600 self-center">Buffer (m)</label>
             <input v-model.number="bufferM" type="number" min="1" step="1" class="px-2 py-1 border rounded text-sm" />
+
             <label class="text-xs text-gray-600 self-center">Filter events</label>
-            <input v-model="qEvents" type="text" placeholder="e.g. Yishun" class="px-2 py-1 border rounded text-sm" />
+            <input v-model="qEvents" type="text" placeholder="e.g. Yishun or 107" class="px-2 py-1 border rounded text-sm" />
+
+            <label class="text-xs text-gray-600 self-center">Sort by</label>
+            <select v-model="sortByCrit" class="px-2 py-1 border rounded text-sm">
+              <option value="delay">Delay</option>
+              <option value="name">Name</option>
+              <option value="id">Flood ID</option>
+            </select>
+
+            <label class="text-xs text-gray-600 self-center">Direction</label>
+            <select v-model="sortDirCrit" class="px-2 py-1 border rounded text-sm">
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
           </div>
           <div class="text-xs text-gray-600">
-            <div>Events loaded: <span class="font-medium">{{ eventsMaster.length }}</span></div>
+            <div>Events loaded: <span class="font-medium">{{ uniqueEvents.length }}</span></div>
             <div>Showing: <span class="font-medium">{{ filteredEvents.length }}</span></div>
             <div v-if="lastPayload">Selected Flood: <span class="font-medium">{{ (lastPayload as any).flood_id }}</span> • Segments: <span class="font-medium">{{ (lastPayload as any).count_critical_segments }}</span></div>
           </div>
@@ -640,24 +713,28 @@ onMounted(async () => {
           </div>
 
           <div v-if="loadingEvents" class="text-gray-500 text-sm">Loading…</div>
-          <div v-else-if="!eventsMaster.length" class="text-gray-500 text-sm">No flood events.</div>
+          <div v-else-if="!uniqueEvents.length" class="text-gray-500 text-sm">No flood events.</div>
 
           <div v-else class="max-h-[40vh] overflow-auto">
             <table class="min-w-full text-sm border">
               <thead class="bg-gray-100 text-gray-700 sticky top-0">
                 <tr>
-                  <th class="px-2 py-1 border text-left">Location</th>
                   <th class="px-2 py-1 border text-right">ID</th>
+                  <th class="px-2 py-1 border text-left">Location</th>
+                  <th class="px-2 py-1 border text-right">Delay (min)</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="e in filteredEvents"
-                    :key="e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id"
+                    :key="e.flood_id"
                     class="hover:bg-gray-50 cursor-pointer"
-                    @click="onSelectFloodRow(e)"
-                    :title="`Zoom & draw critical segments for Flood ${e.flood_id ?? e.id}`">
-                  <td class="px-2 py-1 border">{{ e.flooded_location || e.name || 'Flood event' }}</td>
-                  <td class="px-2 py-1 border text-right">{{ e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id }}</td>
+                    @click="onSelectFloodId(e.flood_id)"
+                    :title="`Zoom & draw critical segments for Flood ${e.flood_id}`">
+                  <td class="px-2 py-1 border text-right">{{ e.flood_id }}</td>
+                  <td class="px-2 py-1 border">{{ e.flooded_location || 'Flood event' }}</td>
+                  <td class="px-2 py-1 border text-right">
+                    {{ Number.isFinite(+e.time_travel_delay_min!) ? (+e.time_travel_delay_min!).toFixed(2) : '—' }}
+                  </td>
                 </tr>
               </tbody>
             </table>
