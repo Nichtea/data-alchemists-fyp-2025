@@ -1,5 +1,5 @@
 from flask import Blueprint
-from src.controllers.flood_events_controller import get_all_flood_events, get_critical_road_segments_near_flood, get_flood_event_by_id, get_flood_events_by_location, get_buses_affected_by_floods, get_flood_events_by_date_range
+from src.controllers.flood_events_controller import get_all_flood_events, get_critical_road_segments_near_flood, get_flood_event_by_id, get_flood_events_by_location, get_buses_affected_by_floods, get_flood_events_by_date_range, get_unique_flood_events_by_location
 from flasgger import swag_from
 from ..examples_for_doc.flooded_events_api import *
 from ..examples_for_doc.flooded_events_schemas import *
@@ -100,3 +100,7 @@ def get_flood_events_by_date():
 @flood_events_route.route("/critical-segments", methods=["GET"])
 def get_critical_segments_endpoint():
     return get_critical_road_segments_near_flood()
+
+@flood_events_route.route("/unique-flood-events/location", methods=["GET"])
+def unique_flood_events_by_location():
+    return get_unique_flood_events_by_location()

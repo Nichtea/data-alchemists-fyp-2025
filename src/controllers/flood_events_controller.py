@@ -457,3 +457,66 @@ def get_critical_road_segments_near_flood():
         return jsonify({"error": "Centrality file not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+def get_unique_flood_events_by_location():
+    try:
+        if flood_events_df.empty or 'flooded_location' not in flood_events_df.columns:
+            return jsonify({"error": "No flood events found or missing 'flooded_location' column"}), 404
+
+        unique_locations_df = flood_events_df[
+            flood_events_df['flooded_location'].notna() &
+            (flood_events_df['flooded_location'].str.strip() != '')
+        ].drop_duplicates(subset=['flooded_location'], keep='first')
+
+        if unique_locations_df.empty:
+            return jsonify([]), 200
+
+        flood_data = []
+        for _, row in unique_locations_df.iterrows():
+            try:
+                geom = wkb.loads(bytes.fromhex(row['geom']))
+                flood_data.append({
+                    'flood_id': row['flood_id'],
+                    'location': row['flooded_location'],
+                    'lat': geom.y,
+                    'lon': geom.x
+                })
+            except Exception as e:
+                print(f"Warning: could not parse geom for flood_id {row['flood_id']}: {e}")
+
+        if not flood_data:
+            return jsonify([]), 200
+
+        lats = [d['lat'] for d in flood_data]
+        lons = [d['lon'] for d in flood_data]
+
+        nearest_edges = ox.distance.nearest_edges(G, X=lons, Y=lats)
+
+        speed_50_ms = 50 * 1000 / 3600  # m/s
+        speed_20_ms = 20 * 1000 / 3600  # m/s
+        speed_diff_per_meter = (1 / speed_20_ms - 1 / speed_50_ms) / 60 
+
+        result = []
+        for i, data in enumerate(flood_data):
+            try:
+                u, v, key = nearest_edges[i]
+                edge_data = G.get_edge_data(u, v, key)
+                road_length_m = edge_data.get('length', 0)
+
+                time_travel_delay_min = round(road_length_m * speed_diff_per_meter, 2)
+
+                result.append({
+                    "flood_id": data['flood_id'],
+                    "flooded_location": data['location'],
+                    "latitude": data['lat'],
+                    "longitude": data['lon'],
+                    "time_travel_delay_min": time_travel_delay_min
+                })
+
+            except Exception as e:
+                print(f"Warning: nearest edge error for flood_id {data['flood_id']}: {e}")
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
