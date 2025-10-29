@@ -1,4 +1,6 @@
 from flask import Flask
+from flask_cors import CORS
+
 from dotenv import load_dotenv
 from flasgger import Swagger
 import os
@@ -22,6 +24,7 @@ def create_app():
     app.register_blueprint(bus_route)
     app.register_blueprint(flood_events_route)
     app.register_blueprint(traffic_route)
+    CORS(app, origins=["https://data-alchemists-fyp-2025.onrender.com"])
     return app
 
 if __name__ == '__main__':

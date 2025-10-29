@@ -7,3 +7,4 @@ gunicorn
 googlemaps
 geopandas
 shapely
+flask-cors
