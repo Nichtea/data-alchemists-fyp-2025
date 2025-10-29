@@ -11,6 +11,8 @@ from src.routes.bus_routes import bus_route
 from src.routes.flood_events_routes import flood_events_route
 from src.routes.traffic_routes import traffic_route
 from src.utils.onemap_auth import get_valid_token, refresh_onemap_token
+from apscheduler.schedulers.background import BackgroundScheduler
+
 
 def create_app():
     app = Flask(__name__,template_folder="src/templates")
@@ -25,6 +27,10 @@ def create_app():
     app.register_blueprint(flood_events_route)
     app.register_blueprint(traffic_route)
     CORS(app, origins=["https://data-alchemists-fyp-2025.onrender.com"])
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(refresh_onemap_token, 'interval', days=2)
+    scheduler.start()
+    print("OneMap auto-token refresh scheduler started")
     return app
 
 if __name__ == '__main__':
