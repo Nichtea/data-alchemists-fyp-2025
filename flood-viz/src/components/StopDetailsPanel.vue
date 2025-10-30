@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/store/app'
-import { geocodeSG, type Coords } from '@/lib/geocode'
-import { getAllBusStops, getBusStopByCode, getBusTripsDelay, getOneMapPtRoute } from '@/api/api'
+import { getAllBusStops, getBusStopByCode, getOneMapPtRoute } from '@/api/api'
 
 
 // ────────────────────────────────────────────────────────────────────────────────

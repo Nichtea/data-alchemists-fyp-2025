@@ -370,8 +370,6 @@ export type FloodLocationCount = {
   time_50kmh_min?: number
 }
 
-
-
 export async function getCriticality(metric: 'betweenness' | 'closeness') {
   try {
     const data = await getJSON<FeatureCollection<FeatureLineString<CriticalityProps>>>(PATHS.criticality, { metric })
