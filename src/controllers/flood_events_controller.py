@@ -8,8 +8,10 @@ import pandas as pd
 import json
 from datetime import datetime
 import requests
+import math
 from shapely import wkb
 from dotenv import load_dotenv
+from src.utils.onemap_auth import get_valid_token
 import geopandas as gpd
 from shapely import wkb
 from shapely.geometry import LineString, Point, mapping
@@ -18,7 +20,6 @@ import pickle
 
 load_dotenv()
 ROOT_DIR = Path(__file__).resolve().parents[2]
-ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 LTA_BUS_ARRIVAL_URL = "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
 ONE_MAP_NEAREST_BUS_STOPS = "https://www.onemap.gov.sg/api/public/nearbysvc/getNearestBusStops"
 LTA_API_KEY = os.getenv("LTA_API_KEY")
@@ -189,6 +190,31 @@ def get_flood_events_by_location():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
+def extend_line(line, extension_m):
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return line  # Cannot extend
+
+    (x1, y1), (x2, y2) = coords[0], coords[-1]
+
+    # Direction vectors
+    dx_start = x1 - coords[1][0]
+    dy_start = y1 - coords[1][1]
+    dx_end = x2 - coords[-2][0]
+    dy_end = y2 - coords[-2][1]
+
+    # Normalize
+    len_start = math.sqrt(dx_start**2 + dy_start**2)
+    len_end = math.sqrt(dx_end**2 + dy_end**2)
+
+    new_start = (x1 + (dx_start / len_start) * extension_m,
+                 y1 + (dy_start / len_start) * extension_m)
+
+    new_end = (x2 + (dx_end / len_end) * extension_m,
+               y2 + (dy_end / len_end) * extension_m)
+
+    return LineString([new_start] + coords[1:-1] + [new_end])
+    
 def get_buses_affected_by_floods():
     flood_id = request.args.get("flood_id")
 
@@ -265,6 +291,9 @@ def get_buses_affected_by_floods():
                     print(f"Using real geometry for edge {u}-{v}")
                 
                 flood_gdf = gpd.GeoDataFrame(geometry=[flood_line], crs="EPSG:4326").to_crs("EPSG:3414")
+                extended_line = extend_line(flood_gdf.geometry.iloc[0], 100)
+                flood_gdf = gpd.GeoDataFrame(geometry=[extended_line], crs="EPSG:3414")
+                distance_threshold_m = 20
                 flood_buffer = flood_gdf.buffer(distance_threshold_m).unary_union
                 
                 candidate_stops = stops_gdf_3414[stops_gdf_3414.geometry.within(flood_buffer)]

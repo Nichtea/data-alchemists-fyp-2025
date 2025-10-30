@@ -6,12 +6,12 @@ import json
 import googlemaps
 from datetime import datetime
 from dotenv import load_dotenv
+from src.utils.onemap_auth import get_valid_token
 
 load_dotenv()
 
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
-ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
 
 def get_bus_trip_segment_by_stop(start_stop, end_stop):
@@ -57,8 +57,9 @@ def get_onemap_route():
             "error": "start_lat, start_lon, end_lat, and end_lon are required."
         }), 400
 
-    if not ONEMAP_API_KEY:
-        return jsonify({"error": "OneMap API key missing. Please set ONEMAP_API_KEY environment variable."}), 500
+    token = get_valid_token()
+    if not token:
+        return jsonify({"error": "OneMap API key missing. Could not retrieve OneMap token."}), 500
 
     params = {
         "start": f"{start_lat},{start_lon}",
@@ -72,7 +73,7 @@ def get_onemap_route():
     }
 
     headers = {
-        "Authorization": ONEMAP_API_KEY
+        "Authorization": token
     }
 
     try:

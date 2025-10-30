@@ -5,12 +5,12 @@ import requests
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+from src.utils.onemap_auth import get_valid_token
 
 load_dotenv()
 
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
-ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
 
 # def get_all_car_trips_flooded():
@@ -93,8 +93,9 @@ def get_onemap_car_route():
     if not start_address or not end_address:
         return jsonify({"error": "start_address and end_address are required"}), 400
 
-    if not ONEMAP_API_KEY:
-        return jsonify({"error": "OneMap API key missing. Please set ONEMAP_API_KEY environment variable."}), 500
+    token = get_valid_token()
+    if not token:
+        return jsonify({"error": "OneMap API key missing. Could not retrieve OneMap token."}), 500
 
     try:
         from concurrent.futures import ThreadPoolExecutor
@@ -133,7 +134,7 @@ def get_onemap_car_route():
                 "end": f"{end_lat},{end_lon}",
                 "routeType": "drive"
             }
-            headers = {"Authorization": ONEMAP_API_KEY}
+            headers = {"Authorization": token}
             response = requests.get(ONEMAP_BASE_URL, headers=headers, params=params, timeout=15)
             return response
         
