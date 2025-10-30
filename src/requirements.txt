@@ -8,3 +8,4 @@ googlemaps
 geopandas
 shapely
 flask-cors
+APScheduler==3.11.0
