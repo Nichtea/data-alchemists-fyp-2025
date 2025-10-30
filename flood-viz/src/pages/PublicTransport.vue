@@ -157,7 +157,7 @@ watch(
           <button
             class="py-2 rounded-lg font-medium text-center transition-colors duration-200"
             :class="activeTab === 'flood'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-red-600 text-white shadow-sm'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
             @click="setTab('flood')"
           >
@@ -171,13 +171,13 @@ watch(
       <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100 min-h-[220px]">
         <!-- ROUTE TAB -->
         <div v-if="activeTab === 'route'">
-          <!-- We tell the panel to show only the BLUE action -->
+          <!-- Panel shows only blue button -->
           <StopDetailsPanel mode="route" />
         </div>
 
         <!-- ITINERARY TAB -->
         <div v-else-if="activeTab === 'itinerary'">
-          <!-- We tell the panel to show only the PURPLE action -->
+          <!-- Panel shows only purple button -->
           <StopDetailsPanel mode="itinerary" />
         </div>
 

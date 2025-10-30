@@ -3,13 +3,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/store/app'
 import { getAllBusStops, getBusStopByCode, getOneMapPtRoute } from '@/api/api'
 
-
-const props = withDefaults(defineProps<{
-  mode?: 'route' | 'itinerary'
-}>(), {
-  mode: 'route',
-})
-// ─────────────────────────────────────────────────────────
+const { mode } = withDefaults(
+  defineProps<{
+    mode?: 'route' | 'itinerary'
+  }>(),
+  {
+    mode: 'route',
+  }
+)
 
 const store = useAppStore()
 
