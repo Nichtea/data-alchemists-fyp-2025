@@ -10,6 +10,7 @@ from datetime import datetime
 import requests
 from shapely import wkb
 from dotenv import load_dotenv
+from src.utils.onemap_auth import get_valid_token
 import geopandas as gpd
 from shapely import wkb
 from shapely.geometry import LineString, Point, mapping
@@ -18,7 +19,6 @@ import pickle
 
 load_dotenv()
 ROOT_DIR = Path(__file__).resolve().parents[2]
-ONEMAP_API_KEY = os.getenv("ONEMAP_API_KEY") 
 LTA_BUS_ARRIVAL_URL = "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
 ONE_MAP_NEAREST_BUS_STOPS = "https://www.onemap.gov.sg/api/public/nearbysvc/getNearestBusStops"
 LTA_API_KEY = os.getenv("LTA_API_KEY")
