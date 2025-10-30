@@ -12,14 +12,36 @@ import { getBusesAffectedByFloods } from '@/api/api'
 useUrlStateSync()
 const store = useAppStore()
 
-/* === reset the chart-driving state when (re)entering the page === */
+/* ─────────────────────────────
+   ACTIVE TAB: 'route' | 'itinerary' | 'flood'
+   ───────────────────────────── */
+const activeTab = ref<'route' | 'itinerary' | 'flood'>('route')
+
+function setTab(tab: 'route' | 'itinerary' | 'flood') {
+  activeTab.value = tab
+
+  // map-layer visibility rules
+  if (tab === 'flood') {
+    store.setLayerVisible('stops', false)
+    store.setLayerVisible('floodEvents', true)
+  } else {
+    // route / itinerary tab
+    store.setLayerVisible('stops', true)
+    store.setLayerVisible('floodEvents', false)
+    clearFloodUI()
+  }
+}
+
+/* ─────────────────────────────
+   RESET CHART ON (RE)ENTER PAGE
+   ───────────────────────────── */
 function resetChart() {
   ;(store as any).serviceRouteOverlay = null
 }
-onMounted(resetChart)     // first time this page is mounted
-onActivated(resetChart)   // when using <KeepAlive>, page re-activates
-onBeforeRouteLeave(resetChart) // optional: tidy up on exit
-onUnmounted(resetChart)   // optional: in case it fully unmounts
+onMounted(resetChart)
+onActivated(resetChart)
+onBeforeRouteLeave(resetChart)
+onUnmounted(resetChart)
 
 /* ================= Chart ================= */
 const chartEntry = computed(() => {
@@ -29,7 +51,12 @@ const chartEntry = computed(() => {
   return { duration_s: Number(d.duration_s), floodSummary: d.floodSummary }
 })
 
-/* ================= Tabs ================= */
+/* ================= Flood / affected bus services ================= */
+const selectedFloodId = ref<number | null>(null)
+const affectedServices = ref<string[]>([])
+const loadingAffected = ref(false)
+const affectedError = ref<string | null>(null)
+
 function clearFloodUI() {
   selectedFloodId.value = null
   affectedServices.value = []
@@ -37,45 +64,9 @@ function clearFloodUI() {
   loadingAffected.value = false
 }
 
-function activateStops() {
-  store.setActiveTab('stops')
-  store.setLayerVisible('stops', true)
-  store.setLayerVisible('floodEvents', false)
-  clearFloodUI() // ← hide & reset flood UI/state
-}
-
-function activateFlood() {
-  store.setActiveTab('flood')
-  store.setLayerVisible('stops', false)
-  store.setLayerVisible('floodEvents', true)
-}
-
-// Safety: if tab changes elsewhere, still clear flood UI
-watch(() => store.activeTab, (tab) => {
-  if (tab !== 'flood') clearFloodUI()
-})
-
-/* ================= Affected bus services ================= */
-const selectedFloodId = ref<number | null>(null)
-const affectedServices = ref<string[]>([])
-const loadingAffected = ref(false)
-const affectedError = ref<string | null>(null)
-
-// (helper kept in case you later need it; not used below)
-function normalizeServiceName(row: any): string | null {
-  return (
-    row?.service_no ??
-    row?.ServiceNo ??
-    row?.service ??
-    row?.Service ??
-    row?.route ??
-    null
-  )
-}
-
 async function onFloodClick(payload: { floodId: number }) {
-  // Ignore flood clicks unless Flood tab is active
-  if (store.activeTab !== 'flood') return
+  // Only respond if we're actually looking at flood tab
+  if (activeTab.value !== 'flood') return
 
   selectedFloodId.value = payload.floodId
   loadingAffected.value = true
@@ -85,41 +76,31 @@ async function onFloodClick(payload: { floodId: number }) {
   try {
     const res: any = await getBusesAffectedByFloods(payload.floodId)
 
-    // Expecting: { results: [ { affected_bus_services: string[], candidate_stops: [...], flood_id: number } ] }
-    if (!res || typeof res !== 'object' || !Array.isArray((res as any).results)) {
+    if (!res || typeof res !== 'object' || !Array.isArray(res.results)) {
       throw new Error('Unexpected response shape (missing results).')
     }
 
-    const first: any = (res as any).results[0]
+    const first: any = res.results[0]
     if (!first || typeof first !== 'object') {
-      // No results → no affected services
       affectedServices.value = []
       return
     }
 
-    // Prefer backend flood_id if present
     if (first.flood_id != null && !Number.isNaN(Number(first.flood_id))) {
       selectedFloodId.value = Number(first.flood_id)
     }
 
-    // -------- TYPE-SAFE NORMALIZATION (fix) --------
     const raw: unknown[] = Array.isArray(first.affected_bus_services)
       ? first.affected_bus_services
       : []
 
-    // map to strings, trim, and filter with a type guard so TS knows it's string[]
     const names: string[] = raw
-      .map((s) => String(s ?? '').trim())
+      .map(s => String(s ?? '').trim())
       .filter((s): s is string => s.length > 0)
 
-    // unique + numeric-aware sort → string[]
     affectedServices.value = Array.from(new Set(names)).sort((a, b) =>
       a.localeCompare(b, undefined, { numeric: true })
     )
-    // -----------------------------------------------
-
-    // If you later want candidate stops, you can read first.candidate_stops here.
-    // (Not stored to state since you said old shapes aren’t needed.)
   } catch (e: any) {
     const msg =
       e?.message ||
@@ -131,42 +112,76 @@ async function onFloodClick(payload: { floodId: number }) {
     loadingAffected.value = false
   }
 }
+
+/* If something else flips layers externally, keep things sane */
+watch(
+  () => activeTab.value,
+  (tab) => {
+    if (tab !== 'flood') clearFloodUI()
+  }
+)
 </script>
 
 <template>
   <div class="h-full grid grid-cols-12 gap-4 p-6 bg-gray-50">
-    <!-- LEFT -->
+
+    <!-- LEFT PANE -->
     <div class="col-span-3 space-y-4">
+
       <!-- Tabs -->
       <div class="bg-white rounded-2xl shadow-sm p-3 border border-gray-100">
-        <div class="flex gap-2">
+        <div class="grid grid-cols-3 gap-2">
+          <!-- Tab 1: Best Route -->
           <button
-            class="flex-1 py-2 rounded-lg font-medium transition-colors duration-200"
-            :class="store.activeTab === 'stops'
+            class="py-2 rounded-lg font-medium text-center transition-colors duration-200"
+            :class="activeTab === 'route'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-            @click="activateStops"
+            @click="setTab('route')"
           >
-            Bus Routes
+            Best Route
           </button>
+
+          <!-- Tab 2: Best Itinerary -->
           <button
-            class="flex-1 py-2 rounded-lg font-medium transition-colors duration-200"
-            :class="store.activeTab === 'flood'
+            class="py-2 rounded-lg font-medium text-center transition-colors duration-200"
+            :class="activeTab === 'itinerary'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+            @click="setTab('itinerary')"
+          >
+            Best Itinerary
+          </button>
+
+          <!-- Tab 3: Flood Impact -->
+          <button
+            class="py-2 rounded-lg font-medium text-center transition-colors duration-200"
+            :class="activeTab === 'flood'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-            @click="activateFlood"
+            @click="setTab('flood')"
           >
-            Affected Bus Services
+            Affected Bus<br class="hidden sm:block" />
+            Services
           </button>
         </div>
       </div>
 
-      <!-- Left card: Stops OR Flood (never both) -->
-      <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100">
-        <!-- Stops content -->
-        <StopDetailsPanel v-if="store.activeTab === 'stops'" />
+      <!-- Card body under tabs -->
+      <div class="bg-white rounded-2xl shadow-sm p-4 border border-gray-100 min-h-[220px]">
+        <!-- ROUTE TAB -->
+        <div v-if="activeTab === 'route'">
+          <!-- We tell the panel to show only the BLUE action -->
+          <StopDetailsPanel mode="route" />
+        </div>
 
-        <!-- Flood content -->
+        <!-- ITINERARY TAB -->
+        <div v-else-if="activeTab === 'itinerary'">
+          <!-- We tell the panel to show only the PURPLE action -->
+          <StopDetailsPanel mode="itinerary" />
+        </div>
+
+        <!-- FLOOD TAB -->
         <div v-else>
           <h2 class="text-base font-semibold text-gray-800 mb-3">
             Affected Bus Services
@@ -178,7 +193,8 @@ async function onFloodClick(payload: { floodId: number }) {
 
           <div v-else>
             <div class="text-sm text-gray-500 mb-2">
-              Flood ID: <span class="font-medium">{{ selectedFloodId }}</span>
+              Flood ID:
+              <span class="font-medium">{{ selectedFloodId }}</span>
             </div>
 
             <div v-if="loadingAffected" class="text-sm text-gray-600">Loading…</div>
@@ -206,15 +222,18 @@ async function onFloodClick(payload: { floodId: number }) {
       </div>
     </div>
 
-    <!-- RIGHT: Chart + Map -->
+    <!-- RIGHT PANE (Chart + Map) -->
     <div class="col-span-9">
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 h-[calc(100vh-3rem)] p-3 flex flex-col">
-        <!-- Optional chart -->
+        <!-- Chart -->
         <div v-if="chartEntry" class="mb-3">
-          <TravelTimeBarChart :entry="chartEntry" title="Travel Time Scenarios" />
+          <TravelTimeBarChart
+            :entry="chartEntry"
+            title="Travel Time Scenarios"
+          />
         </div>
 
-        <!-- Map fills remaining space -->
+        <!-- Map -->
         <div class="flex-1 min-h-0 overflow-hidden rounded-xl border border-gray-100">
           <MapCanvas @flood-click="onFloodClick" />
         </div>

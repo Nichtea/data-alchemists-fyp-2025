@@ -4,7 +4,13 @@ import { useAppStore } from '@/store/app'
 import { getAllBusStops, getBusStopByCode, getOneMapPtRoute } from '@/api/api'
 
 
-// ────────────────────────────────────────────────────────────────────────────────
+const props = withDefaults(defineProps<{
+  mode?: 'route' | 'itinerary'
+}>(), {
+  mode: 'route',
+})
+// ─────────────────────────────────────────────────────────
+
 const store = useAppStore()
 
 let BUS_ROUTES_CACHE: any[] | null = null
@@ -23,19 +29,18 @@ function toLonLat(p: [number, number]) {
 /** Zoom the map to this direction’s geometry (roadPath preferred) */
 function viewDirectionOnMap(d: {
   roadPath?: [number, number][],
-  points?: [number, number][]
+  points?: [number, number][],
 }) {
   const coords = (Array.isArray(d?.roadPath) && d.roadPath.length >= 2)
     ? d.roadPath
     : (Array.isArray(d?.points) && d.points.length >= 2)
       ? d.points
-      : [];
+      : []
 
-  if (!coords.length) return;
+  if (!coords.length) return
 
-  // send the coords to the map; the map watches this and fits bounds
-  (store as any)._fitBoundsCoords = coords;
-  (store as any).setActiveTab?.('stops');
+  ;(store as any)._fitBoundsCoords = coords
+  ;(store as any).setActiveTab?.('stops')
 }
 
 function clearMapRoutes() {
@@ -74,11 +79,13 @@ async function buildServiceIndex(): Promise<ServiceDirStops> {
     const idx: ServiceDirStops = Object.create(null)
     const key = (r:any) => `${r.ServiceNo}|${r.Direction}`
     const groups = new Map<string, any[]>()
+
     for (const r of rows) {
       const k = key(r)
       if (!groups.has(k)) groups.set(k, [])
       groups.get(k)!.push(r)
     }
+
     for (const [k, arr] of groups) {
       arr.sort((a,b) => Number(a.StopSequence) - Number(b.StopSequence))
       const [svcStr, dirStr] = k.split('|')
@@ -186,7 +193,9 @@ async function findDirectCandidates(aCode: string, bCode: string): Promise<Direc
       const seq = dirMap[dir]
       const iA = seq.indexOf(aCode)
       const iB = seq.indexOf(bCode)
-      if (iA >= 0 && iB > iA) out.push({ serviceNo: svc, dir, stopCodes: seq, iA, iB, hops: iB - iA })
+      if (iA >= 0 && iB > iA) {
+        out.push({ serviceNo: svc, dir, stopCodes: seq, iA, iB, hops: iB - iA })
+      }
     }
   }
   out.sort((a,b) => a.hops - b.hops)
@@ -286,7 +295,8 @@ function searchStops(query: string) {
     if (inName || codePrefix) {
       const score =
         (codePrefix ? 100 : 0) +
-        (s.name.toLowerCase().startsWith(q) ? 50 : 0) - s.name.length
+        (s.name.toLowerCase().startsWith(q) ? 50 : 0) -
+        s.name.length
       scored.push([score, s] as const)
     }
   }
@@ -400,7 +410,6 @@ function toNumOrUndefined(val: unknown): number | undefined {
 
 function legIsFlooded(leg: any): boolean {
   if (!leg || leg.mode !== 'BUS') return false
-  // prefer explicit flag
   const flag = String(leg?.overall_bus_route_status || '').toLowerCase()
   if (flag === 'flooded') return true
   if (flag === 'clear') return false
@@ -415,23 +424,20 @@ function legIsFlooded(leg: any): boolean {
   return candidates.some(v => v! > (base as number))
 }
 
-/** Aggregate non-flooded & flooded durations (seconds) across all BUS legs */
 function summarizeFloodDurations(legs: any[]) {
   let baseline_s = 0
   let anyBaseline = false
-  const map = new Map<string, number>() // scenario -> seconds
+  const map = new Map<string, number>()
 
   for (const leg of legs ?? []) {
     if (leg?.mode !== 'BUS') continue
 
-    // baseline (non-flooded)
     const base = toNumOrUndefined((leg as any).non_flooded_bus_duration)
     if (Number.isFinite(base)) {
       baseline_s += base!
       anyBaseline = true
     }
 
-    // flooded scenarios
     const pairs: Array<[label: string, key: string]> = [
       ['5 km/h flooded',  '5kmh_flooded_bus_duration'],
       ['10 km/h flooded', '10kmh_flooded_bus_duration'],
@@ -452,14 +458,15 @@ function summarizeFloodDurations(legs: any[]) {
   }
 }
 
-/** Compute TOTAL itinerary time (overall) for a given scenario */
-function totalTimeMinutes(it: { duration_s: number, floodSummary?: { baseline_s?: number } }, scenarioDur_s: number) {
+function totalTimeMinutes(
+  it: { duration_s: number, floodSummary?: { baseline_s?: number } },
+  scenarioDur_s: number
+) {
   const baselineBus = it.floodSummary?.baseline_s ?? 0
   const total_s = it.duration_s + (scenarioDur_s - baselineBus)
   return Math.max(0, Math.round(total_s / 60))
 }
 
-/* -------- helpers for route chips & stop lists -------- */
 function legStops(leg: any): string[] {
   if (!leg?.transitLeg || leg?.mode !== 'BUS') return []
   const arr: string[] = []
@@ -490,7 +497,7 @@ function routeLabel(leg: any) {
   return leg?.routeShortName || leg?.route || 'BUS'
 }
 
-/* -------- Build colored polylines (red if leg is flooded) -------- */
+/* colors for flooded vs clear polylines */
 const BASE_COLOR = '#2563eb'
 const FLOODED_COLOR = '#dc2626'
 
@@ -540,7 +547,9 @@ async function buildColoredPolylinesFromItinerary(it: any) {
   }
   const seen = new Set<string>()
   const segmentCodes = stopCodes.filter(c => !seen.has(c) && seen.add(c))
-  const points: [number, number][] = segmentCodes.map(c => latLonFromCode(c)).filter(Boolean) as [number, number][]
+  const points: [number, number][] = segmentCodes
+    .map(c => latLonFromCode(c))
+    .filter(Boolean) as [number, number][]
 
   const roadPath: [number, number][] =
     polylines.length
@@ -550,7 +559,6 @@ async function buildColoredPolylinesFromItinerary(it: any) {
   return { polylines, segments, stopCodes: segmentCodes, points, roadPath }
 }
 
-/** ------------ Hold all built itineraries and selection ------------ */
 type BuiltItinerary = {
   duration_s: number
   transfers: number
@@ -588,7 +596,7 @@ function applyItineraryToMap(i: number) {
   ;(store as any).fitToOverlayBounds?.()
 }
 
-/** ---------- OneMap PT: top-level function ---------- */
+/** ---------- OneMap PT: address-to-address ---------- */
 async function queryPtRouteViaOneMap() {
   if (!originText.value || !destText.value) {
     alert('Enter a start and end address to use OneMap PT routing.')
@@ -634,7 +642,7 @@ async function queryPtRouteViaOneMap() {
   }
 }
 
-/** ---------- Stop→Stop best route ---------- */
+/** ---------- Stop→Stop best route (same service, no transfer) ---------- */
 const hasOrigin = computed(() => Boolean((store as any).origin?.lat && (store as any).origin?.lon))
 const hasDest = computed(() => Boolean((store as any).destination?.lat && (store as any).destination?.lon))
 
@@ -698,7 +706,7 @@ async function queryBestBusRoute() {
   ;(store as any).fitToOverlayBounds?.()
 }
 
-/** Draw service route (for live arrivals “Show route” button) */
+/** Draw service route (for "Show route" in arrivals) */
 async function drawServiceRoute(serviceNo: string) {
   if (!serviceNo) return
 
@@ -801,7 +809,10 @@ onMounted(async () => {
             <li
               v-for="(s,i) in originSuggests"
               :key="'o-' + s.code"
-              :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===originHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
+              :class="[
+                'px-2 py-1 cursor-pointer flex items-center justify-between',
+                i===originHover ? 'bg-blue-50' : 'hover:bg-gray-50'
+              ]"
               @mouseenter="originHover = i"
               @mousedown.prevent="selectStopFor('origin', s)"
             >
@@ -832,7 +843,10 @@ onMounted(async () => {
             <li
               v-for="(s,i) in destSuggests"
               :key="'d-' + s.code"
-              :class="['px-2 py-1 cursor-pointer flex items-center justify-between', i===destHover ? 'bg-blue-50' : 'hover:bg-gray-50']"
+              :class="[
+                'px-2 py-1 cursor-pointer flex items-center justify-between',
+                i===destHover ? 'bg-blue-50' : 'hover:bg-gray-50'
+              ]"
               @mouseenter="destHover = i"
               @mousedown.prevent="selectStopFor('dest', s)"
             >
@@ -843,38 +857,47 @@ onMounted(async () => {
         </div>
       </label>
 
+      <!-- Action buttons row -->
       <div class="flex items-center gap-2 flex-wrap">
+        <!-- BLUE: only in 'route' mode -->
         <button
+          v-if="mode === 'route'"
           class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
           @click="queryBestBusRoute"
           title="Find best bus route between selected stops"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
           </svg>
           Find best bus route
         </button>
 
+        <!-- PURPLE: only in 'itinerary' mode -->
         <button
+          v-if="mode === 'itinerary'"
           class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
           @click="queryPtRouteViaOneMap"
           :disabled="ptLoading"
           title="Public transport via OneMap (type addresses above)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+            <path
+              d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
+            />
           </svg>
           {{ ptLoading ? 'Routing…' : 'Find best bus itinerary' }}
         </button>
 
-        <!-- Clear all -->
+        <!-- Clear all (always visible) -->
         <button
           class="inline-flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
           @click="clearMapRoutes"
           title="Clear all drawn routes and map markers"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"/>
           </svg>
           Clear Map & Routes
         </button>
@@ -883,15 +906,26 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- ====== Itinerary list ====== -->
-    <div v-if="ptItins.length" class="mb-4">
-      <div class="text-sm font-semibold mb-2">Itineraries ({{ ptItins.length }})</div>
+    <!-- ====== Itinerary list ======
+         only relevant in itinerary mode -->
+    <div
+      v-if="mode === 'itinerary' && ptItins.length"
+      class="mb-4"
+    >
+      <div class="text-sm font-semibold mb-2">
+        Itineraries ({{ ptItins.length }})
+      </div>
 
       <div class="space-y-3">
         <div
           v-for="(it, idx) in ptItins"
           :key="'it-' + idx"
-          :class="['rounded-xl border p-3 shadow-sm', selectedItinIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200']"
+          :class="[
+            'rounded-xl border p-3 shadow-sm',
+            selectedItinIdx === idx
+              ? 'border-blue-400 ring-2 ring-blue-200'
+              : 'border-gray-200'
+          ]"
         >
           <div class="flex items-center gap-3">
             <div class="text-base font-semibold">Option {{ idx + 1 }}</div>
@@ -903,7 +937,9 @@ onMounted(async () => {
             <div class="ml-auto">
               <button
                 class="rounded-md border px-2 py-1 text-xs"
-                :class="selectedItinIdx === idx ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 hover:bg-gray-50'"
+                :class="selectedItinIdx === idx
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50'"
                 @click="selectedItinIdx = idx; applyItineraryToMap(idx)"
                 title="Show this itinerary on the map"
               >
@@ -914,23 +950,38 @@ onMounted(async () => {
 
           <!-- Stops & segments -->
           <details class="mt-2 rounded-md bg-gray-50 p-3 open:bg-gray-100">
-            <summary class="cursor-pointer select-none text-sm text-gray-700">Stops & segments</summary>
+            <summary class="cursor-pointer select-none text-sm text-gray-700">
+              Stops & segments
+            </summary>
 
             <div class="space-y-4 mt-2">
               <div
                 v-for="(L, li) in it.legs.filter(x => x.mode==='BUS')"
                 :key="'legstops-'+li"
                 class="rounded-md border p-2"
-                :style="{ borderColor: legStatus(L)==='flooded' ? '#fecaca' : '#bfdbfe' }"
+                :style="{
+                  borderColor: legStatus(L)==='flooded'
+                    ? '#fecaca'
+                    : '#bfdbfe'
+                }"
               >
                 <div class="flex items-center gap-2 text-sm mb-2">
                   <span
                     class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1"
-                    :style="{ backgroundColor: legChipStyle(L).bg, color: legChipStyle(L).text, boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset` }"
+                    :style="{
+                      backgroundColor: legChipStyle(L).bg,
+                      color: legChipStyle(L).text,
+                      boxShadow: `0 0 0 1px ${legChipStyle(L).ring} inset`
+                    }"
                   >
                     Bus {{ routeLabel(L) }}
                   </span>
-                  <span class="text-xs" :class="legStatus(L)==='flooded' ? 'text-rose-600' : 'text-blue-600'">
+                  <span
+                    class="text-xs"
+                    :class="legStatus(L)==='flooded'
+                      ? 'text-rose-600'
+                      : 'text-blue-600'"
+                  >
                     {{ legStatus(L)==='flooded' ? 'Flooded' : 'Clear' }}
                   </span>
                 </div>
@@ -943,12 +994,20 @@ onMounted(async () => {
                   >
                     <span
                       class="inline-flex h-5 w-5 items-center justify-center rounded-full text-white text-[11px]"
-                      :style="{ backgroundColor: legStatus(L)==='flooded' ? '#dc2626' : '#2563eb' }"
+                      :style="{
+                        backgroundColor: legStatus(L)==='flooded'
+                          ? '#dc2626'
+                          : '#2563eb'
+                      }"
                     >
                       {{ si + 1 }}
                     </span>
-                    <span class="truncate">{{ stopIndexByCode[code]?.name || 'Stop' }}</span>
-                    <span class="text-xs text-gray-500">({{ code }})</span>
+                    <span class="truncate">
+                      {{ stopIndexByCode[code]?.name || 'Stop' }}
+                    </span>
+                    <span class="text-xs text-gray-500">
+                      ({{ code }})
+                    </span>
                   </li>
                 </ol>
               </div>
@@ -959,39 +1018,91 @@ onMounted(async () => {
     </div>
 
     <!-- ====== Selected stop detail + arrivals ====== -->
-    <div v-if="store.selectedStopLoading" class="text-sm text-gray-500">Loading stop details...</div>
+    <div
+      v-if="store.selectedStopLoading"
+      class="text-sm text-gray-500"
+    >
+      Loading stop details...
+    </div>
 
-    <div v-else-if="!store.selectedStop">
-      <div class="text-sm text-gray-500">Click a stop on the map to see details here.</div>
+    <div
+      v-else-if="!store.selectedStop"
+    >
+      <div class="text-sm text-gray-500">
+        Click a stop on the map to see details here.
+      </div>
     </div>
 
     <div v-else>
       <div class="flex items-center justify-between mb-2">
         <div>
           <div class="font-semibold">
-            {{ (store.selectedStop as any)?.name || (store.selectedStop as any)?.stop_name || 'Stop details' }}
+            {{
+              (store.selectedStop as any)?.name ||
+              (store.selectedStop as any)?.stop_name ||
+              'Stop details'
+            }}
           </div>
         </div>
-        <button class="text-xs text-gray-500 hover:text-gray-700" @click="store.clearSelection()">clear</button>
+        <button
+          class="text-xs text-gray-500 hover:text-gray-700"
+          @click="store.clearSelection()"
+        >
+          clear
+        </button>
       </div>
 
-      <div v-if="Array.isArray((store.selectedStop as any)?.service_routes)" class="mt-2">
+      <div
+        v-if="Array.isArray((store.selectedStop as any)?.service_routes)"
+        class="mt-2"
+      >
         <div class="text-sm font-medium mb-1">Service routes</div>
         <ul class="space-y-1">
-          <li v-for="(r, i) in (store.selectedStop as any).service_routes" :key="i" class="text-sm">
-            {{ r?.name || r?.route_short_name || r?.route_long_name || r?.id || 'route' }}
+          <li
+            v-for="(r, i) in (store.selectedStop as any).service_routes"
+            :key="i"
+            class="text-sm"
+          >
+            {{
+              r?.name ||
+              r?.route_short_name ||
+              r?.route_long_name ||
+              r?.id ||
+              'route'
+            }}
           </li>
         </ul>
       </div>
 
-      <div v-if="arrivalsLoading" class="text-sm text-gray-500 mt-3">Loading arrivals…</div>
-      <div v-else-if="arrivalsError" class="text-sm text-rose-600 mt-3">{{ arrivalsError }}</div>
+      <div
+        v-if="arrivalsLoading"
+        class="text-sm text-gray-500 mt-3"
+      >
+        Loading arrivals…
+      </div>
 
-      <div v-else-if="arrivals && arrivals.length" class="mt-3">
-        <div v-if="(store as any).serviceRouteOverlay" class="mt-4">
-          <div class="rounded-xl border border-gray-200 bg-white/80 backdrop-blur shadow-sm p-4">
+      <div
+        v-else-if="arrivalsError"
+        class="text-sm text-rose-600 mt-3"
+      >
+        {{ arrivalsError }}
+      </div>
+
+      <div
+        v-else-if="arrivals && arrivals.length"
+        class="mt-3"
+      >
+        <div
+          v-if="(store as any).serviceRouteOverlay"
+          class="mt-4"
+        >
+          <div
+            class="rounded-xl border border-gray-200 bg-white/80 backdrop-blur shadow-sm p-4"
+          >
             <div class="flex items-center gap-2">
-              <span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10">
+              <span
+                class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10"
+              >
                 Selected route
               </span>
               <div class="text-base font-semibold">
@@ -1008,18 +1119,29 @@ onMounted(async () => {
               <div class="flex items-center gap-2 text-sm">
                 <div class="font-medium">Direction {{ d.dir }}</div>
                 <div class="text-gray-400">•</div>
-                <div v-if="Number.isFinite(d.distance_m)" class="text-gray-700">
+                <div
+                  v-if="Number.isFinite(d.distance_m)"
+                  class="text-gray-700"
+                >
                   ~ {{ (d.distance_m / 1000).toFixed(2) }} km
                 </div>
-                <div v-if="Number.isFinite(d.duration_s)" class="text-gray-700">
+                <div
+                  v-if="Number.isFinite(d.duration_s)"
+                  class="text-gray-700"
+                >
                   • ~ {{ Math.round(d.duration_s / 60) }} min
                 </div>
                 <div class="text-gray-400">•</div>
                 <div class="text-gray-700">
-                  {{ Array.isArray(d.stopCodes) ? (d.stopCodes.length - 1) : 0 }} stops
+                  {{
+                    Array.isArray(d.stopCodes)
+                      ? (d.stopCodes.length - 1)
+                      : 0
+                  }} stops
                 </div>
                 <div class="ml-auto text-xs text-gray-500">
-                  geometry: {{ d.roadPath ? 'OSRM road' : 'stop-to-stop' }}
+                  geometry:
+                  {{ d.roadPath ? 'OSRM road' : 'stop-to-stop' }}
                 </div>
               </div>
 
@@ -1040,18 +1162,26 @@ onMounted(async () => {
               </div>
 
               <details class="mt-2 rounded-md bg-gray-50 p-3 open:bg-gray-100">
-                <summary class="cursor-pointer select-none text-sm text-gray-700">Show stops</summary>
+                <summary class="cursor-pointer select-none text-sm text-gray-700">
+                  Show stops
+                </summary>
                 <ol class="mt-2 space-y-1">
                   <li
                     v-for="(code, idx) in (d.stopCodes || [])"
                     :key="code"
                     class="flex items-center gap-2 text-sm"
                   >
-                    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[11px]">
+                    <span
+                      class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[11px]"
+                    >
                       {{ idx + 1 }}
                     </span>
-                    <span class="truncate">{{ stopIndexByCode[code]?.name || 'Stop' }}</span>
-                    <span class="text-xs text-gray-500">({{ code }})</span>
+                    <span class="truncate">
+                      {{ stopIndexByCode[code]?.name || 'Stop' }}
+                    </span>
+                    <span class="text-xs text-gray-500">
+                      ({{ code }})
+                    </span>
                   </li>
                 </ol>
               </details>
@@ -1067,11 +1197,18 @@ onMounted(async () => {
             class="border rounded-md p-2 flex items-center justify-between"
           >
             <div class="flex items-center gap-3">
-              <div class="text-base font-semibold tabular-nums">{{ svc.no }}</div>
+              <div class="text-base font-semibold tabular-nums">
+                {{ svc.no }}
+              </div>
               <div class="text-xs text-gray-500">
                 <div>{{ svc.operator }}</div>
-                <div v-if="svc.next?.time" class="text-[11px]">
-                  ETA: {{ Math.round((svc.next?.duration_ms ?? 0) / 60000) }} min
+                <div
+                  v-if="svc.next?.time"
+                  class="text-[11px]"
+                >
+                  ETA:
+                  {{ Math.round((svc.next?.duration_ms ?? 0) / 60000) }}
+                  min
                 </div>
               </div>
               <button
@@ -1080,14 +1217,18 @@ onMounted(async () => {
                 @click="drawServiceRoute(svc.no)"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+                  <path
+                    d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
+                  />
                 </svg>
                 Show route
               </button>
             </div>
 
             <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600">
+              <span
+                class="px-2 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600"
+              >
                 {{ (svc.next?.load || '-').toUpperCase() }}
               </span>
               <span
@@ -1105,10 +1246,16 @@ onMounted(async () => {
         </div>
 
         <details class="mt-2">
-          <summary class="text-xs text-gray-500 cursor-pointer">More times</summary>
+          <summary class="text-xs text-gray-500 cursor-pointer">
+            More times
+          </summary>
           <ul class="mt-2 space-y-1 text-xs text-gray-700">
-            <li v-for="svc in arrivals" :key="svc.no + '-more'">
-              <span class="font-medium">{{ svc.no }}</span> →
+            <li
+              v-for="svc in arrivals"
+              :key="svc.no + '-more'"
+            >
+              <span class="font-medium">{{ svc.no }}</span>
+              →
               <span>next2: {{ Math.round((svc.next2?.duration_ms ?? 0) / 60000) }} min</span>,
               <span>next3: {{ Math.round((svc.next3?.duration_ms ?? 0) / 60000) }} min</span>
             </li>
@@ -1116,13 +1263,23 @@ onMounted(async () => {
         </details>
       </div>
 
-      <div v-else class="text-sm text-gray-500 mt-3">No live arrivals.</div>
+      <div
+        v-else
+        class="text-sm text-gray-500 mt-3"
+      >
+        No live arrivals.
+      </div>
 
       <details class="mt-3">
-        <summary class="cursor-pointer text-xs text-gray-500">Raw</summary>
-        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-auto">{{ JSON.stringify(store.selectedStop, null, 2) }}</pre>
+        <summary class="cursor-pointer text-xs text-gray-500">
+          Raw
+        </summary>
+        <pre class="text-[11px] bg-gray-50 p-2 rounded overflow-auto">
+{{ JSON.stringify(store.selectedStop, null, 2) }}
+        </pre>
       </details>
     </div>
   </div>
 </template>
+
 
